@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Leidmann Virtual Try-On — Prototype</title>
+<style>
+  :root {
+    --bg: #f4efe8;
+    --panel: #ffffff;
+    --ink: #2a201a;
+    --ink-soft: #6b5d52;
+    --brown: #543f2e;
+    --brown-deep: #3a2b1f;
+    --gold: #a9834f;
+    --line: #e2d8cb;
+    --ok: #3f6b4a;
+    --bad: #a3433a;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  body {
+    min-height: 100vh;
+    padding: 28px 16px 48px;
+  }
+  .wrap {
+    max-width: 920px;
+    margin: 0 auto;
+  }
+  header {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  .mark {
+    font-family: "Playfair Display", Georgia, "Times New Roman", serif;
+    font-size: clamp(28px, 5vw, 38px);
+    letter-spacing: 0.04em;
+    color: var(--brown-deep);
+    margin: 0;
+  }
+  .tagline {
+    margin: 6px 0 0;
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .badge {
+    display: inline-block;
+    margin-top: 12px;
+    padding: 4px 12px;
+    border: 1px solid var(--gold);
+    border-radius: 999px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--brown-deep);
+  }
+
+  .stage {
+    position: relative;
+    background: #111;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 18px 40px rgba(58, 43, 31, 0.22);
+    aspect-ratio: 3 / 4;
+    max-height: 72vh;
+    margin: 0 auto;
+  }
+  video { display: none; }
+  canvas#output {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+  }
+
+  .stage-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 24px;
+    text-align: center;
+    background: linear-gradient(180deg, rgba(17,17,17,0.35), rgba(17,17,17,0.75));
+    color: #f4efe8;
+  }
+  .stage-overlay p { margin: 0; max-width: 46ch; line-height: 1.5; font-size: 14px; color: #e9ddcf; }
+  .stage-overlay.hidden { display: none; }
+
+  button.primary {
+    appearance: none;
+    border: none;
+    background: var(--brown);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 12px 24px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  button.primary:hover { background: var(--brown-deep); }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+
+  .status-line {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    right: 14px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #f4efe8;
+    pointer-events: none;
+  }
+  .status-pill {
+    background: rgba(17,17,17,0.55);
+    padding: 5px 10px;
+    border-radius: 999px;
+    backdrop-filter: blur(2px);
+  }
+  .status-pill.live { color: #c9e8c9; }
+  .status-pill.searching { color: #f0d9a8; }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 20px;
+  }
+  .frame-btn {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    padding: 10px 16px;
+    border-radius: 12px;
+    cursor: pointer;
+    text-align: left;
+    min-width: 168px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .frame-btn:hover { border-color: var(--gold); }
+  .frame-btn.active {
+    border-color: var(--brown);
+    box-shadow: 0 0 0 1px var(--brown);
+  }
+  .frame-btn .name {
+    display: block;
+    font-family: "Playfair Display", Georgia, serif;
+    font-size: 16px;
+    color: var(--brown-deep);
+  }
+  .frame-btn .ref {
+    display: block;
+    font-size: 11px;
+    color: var(--ink-soft);
+    margin-top: 2px;
+  }
+  .swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  .toolbar {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 16px;
+  }
+  button.ghost {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--ink-soft);
+    font-size: 13px;
+    padding: 9px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  button.ghost:hover { border-color: var(--brown); color: var(--brown-deep); }
+
+  .note {
+    max-width: 60ch;
+    margin: 28px auto 0;
+    padding: 16px 18px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+  }
+  .note strong { color: var(--ink); }
+
+  footer {
+    text-align: center;
+    margin-top: 28px;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  @media (max-width: 480px) {
+    .stage { aspect-ratio: 3 / 4; max-height: 62vh; }
+    .frame-btn { min-width: 44%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="mark">LEIDMANN</p>
+    <p class="tagline">Virtual Try-On · Working Prototype</p>
+    <span class="badge">Internal demo, not for public release</span>
+  </header>
+
+  <div class="stage" id="stage">
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="output"></canvas>
+    <div class="status-line" id="statusLine" style="display:none;">
+      <span class="status-pill searching" id="trackingStatus">Searching for face…</span>
+      <span class="status-pill" id="frameStatus">Rondo · Tortoise</span>
+    </div>
+    <div class="stage-overlay" id="startOverlay">
+      <p style="font-family: 'Playfair Display', Georgia, serif; font-size: 20px; color: #f4efe8; max-width: 28ch;">See it on, before it arrives.</p>
+      <p>Turns on your camera and tracks your face live in the browser — nothing is recorded or uploaded.</p>
+      <button class="primary" id="startBtn">Start camera</button>
+      <p id="permissionError" style="color:#e8b3ac; font-size:12px; display:none;"></p>
+    </div>
+  </div>
+
+  <div class="controls" id="frameControls">
+    <button class="frame-btn active" data-style="tortoise">
+      <span class="name"><span class="swatch" style="background:#7a5636;"></span>Rondo · Tortoise</span>
+      <span class="ref">Style study — ref. Matsuda M1042</span>
+    </button>
+    <button class="frame-btn" data-style="gold">
+      <span class="name"><span class="swatch" style="background:#b9975a;"></span>Linea · Gold Wire</span>
+      <span class="ref">Style study — ref. Cartier CT0645S</span>
+    </button>
+  </div>
+
+  <div class="toolbar">
+    <button class="ghost" id="snapshotBtn" disabled>Save snapshot</button>
+    <button class="ghost" id="stopBtn" disabled>Stop camera</button>
+  </div>
+
+  <div class="note">
+    <strong>What this is:</strong> a working proof of the core mechanism — live face tracking in the browser, with a frame overlay that follows head position, scale and tilt in real time. The two styles are original vector illustrations referencing the silhouette of two pieces in the collection, not photographs of the actual product. A production version would replace these with real cutout photography or 3D models for every SKU, wired into the product pages.
+  </div>
+
+  <footer>Prototype build · runs entirely in this browser · no data leaves your device</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script>
+(function () {
+  "use strict";
+
+  const videoEl = document.getElementById('video');
+  const canvasEl = document.getElementById('output');
+  const ctx = canvasEl.getContext('2d');
+  const startOverlay = document.getElementById('startOverlay');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const snapshotBtn = document.getElementById('snapshotBtn');
+  const statusLine = document.getElementById('statusLine');
+  const trackingStatus = document.getElementById('trackingStatus');
+  const frameStatus = document.getElementById('frameStatus');
+  const permissionError = document.getElementById('permissionError');
+  const frameButtons = document.querySelectorAll('.frame-btn');
+
+  let currentStyle = 'tortoise';
+  let faceMesh = null;
+  let camera = null;
+  let lastLandmarks = null;
+  let running = false;
+
+  const STYLE_LABEL = {
+    tortoise: 'Rondo · Tortoise',
+    gold: 'Linea · Gold Wire'
+  };
+
+  frameButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      frameButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentStyle = btn.dataset.style;
+      frameStatus.textContent = STYLE_LABEL[currentStyle];
+    });
+  });
+
+  // ---- Drawing: landmark-driven glasses overlay ----
+  // MediaPipe FaceMesh landmark indices used:
+  // 33  = left eye outer corner    263 = right eye outer corner
+  // 168 = bridge of nose           10  = forehead / top of face
+  function drawGlasses(landmarks, w, h, style) {
+    const L = landmarks[33];
+    const R = landmarks[263];
+    if (!L || !R) return;
+
+    const lx = L.x * w, ly = L.y * h;
+    const rx = R.x * w, ry = R.y * h;
+    const cx = (lx + rx) / 2;
+    const cy = (ly + ry) / 2;
+    const eyeDist = Math.hypot(rx - lx, ry - ly);
+    const angle = Math.atan2(ry - ly, rx - lx);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+
+    const lensR = eyeDist * 0.46;
+    const lensOffsetX = eyeDist * 0.54;
+    const bridgeW = eyeDist * 0.16;
+    const templeLen = eyeDist * 0.55;
+
+    if (style === 'tortoise') {
+      const grad = ctx.createLinearGradient(-lensOffsetX - lensR, -lensR, lensOffsetX + lensR, lensR);
+      grad.addColorStop(0, '#4a3220');
+      grad.addColorStop(0.5, '#8a5f38');
+      grad.addColorStop(1, '#4a3220');
+
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = grad;
+      ctx.fillStyle = 'rgba(40, 26, 14, 0.16)';
+      ctx.lineWidth = eyeDist * 0.12;
+
+      [-1, 1].forEach(side => {
+        const lx0 = side * lensOffsetX;
+        roundedLensPath(lx0, 0, lensR * 1.08, lensR * 0.86);
+        ctx.fill();
+        ctx.stroke();
+      });
+
+      // bridge
+      ctx.beginPath();
+      ctx.moveTo(-bridgeW / 2, -lensR * 0.15);
+      ctx.quadraticCurveTo(0, lensR * 0.05, bridgeW / 2, -lensR * 0.15);
+      ctx.lineWidth = eyeDist * 0.09;
+      ctx.stroke();
+
+      // temples fading toward ears
+      ctx.lineWidth = eyeDist * 0.1;
+      [-1, 1].forEach(side => {
+        const startX = side * (lensOffsetX + lensR * 0.95);
+        ctx.beginPath();
+        ctx.moveTo(startX, 0);
+        ctx.lineTo(startX + side * templeLen, -eyeDist * 0.05);
+        ctx.globalAlpha = 0.65;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      });
+    } else {
+      // gold wire
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#c9a564';
+      ctx.fillStyle = 'rgba(255, 244, 214, 0.08)';
+      ctx.lineWidth = eyeDist * 0.035;
+
+      [-1, 1].forEach(side => {
+        const lx0 = side * lensOffsetX;
+        ctx.beginPath();
+        ctx.ellipse(lx0, 0, lensR, lensR * 0.82, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+
+      ctx.beginPath();
+      ctx.moveTo(-bridgeW / 2, -lensR * 0.1);
+      ctx.lineTo(bridgeW / 2, -lensR * 0.1);
+      ctx.stroke();
+
+      ctx.lineWidth = eyeDist * 0.03;
+      [-1, 1].forEach(side => {
+        const startX = side * (lensOffsetX + lensR * 0.98);
+        ctx.beginPath();
+        ctx.moveTo(startX, 0);
+        ctx.lineTo(startX + side * templeLen, -eyeDist * 0.04);
+        ctx.globalAlpha = 0.6;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      });
+    }
+
+    ctx.restore();
+  }
+
+  function roundedLensPath(cx0, cy0, rx, ry) {
+    ctx.beginPath();
+    ctx.ellipse(cx0, cy0, rx, ry, 0, 0, Math.PI * 2);
+  }
+
+  function onResults(results) {
+    const w = canvasEl.width;
+    const h = canvasEl.height;
+    ctx.save();
+    ctx.clearRect(0, 0, w, h);
+    // mirror horizontally for a natural "mirror" try-on view
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(results.image, 0, 0, w, h);
+
+    if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+      lastLandmarks = results.multiFaceLandmarks[0];
+      drawGlasses(lastLandmarks, w, h, currentStyle);
+      setTracking(true);
+    } else {
+      lastLandmarks = null;
+      setTracking(false);
+    }
+    ctx.restore();
+  }
+
+  function setTracking(found) {
+    if (found) {
+      trackingStatus.textContent = 'Tracking';
+      trackingStatus.classList.remove('searching');
+      trackingStatus.classList.add('live');
+    } else {
+      trackingStatus.textContent = 'Searching for face…';
+      trackingStatus.classList.remove('live');
+      trackingStatus.classList.add('searching');
+    }
+  }
+
+  function resizeCanvasToVideo() {
+    const vw = videoEl.videoWidth || 720;
+    const vh = videoEl.videoHeight || 960;
+    canvasEl.width = vw;
+    canvasEl.height = vh;
+  }
+
+  async function start() {
+    startBtn.disabled = true;
+    permissionError.style.display = 'none';
+
+    if (typeof FaceMesh === 'undefined' || typeof Camera === 'undefined') {
+      permissionError.textContent = 'Tracking library failed to load. Check your internet connection and reload the page.';
+      permissionError.style.display = 'block';
+      startBtn.disabled = false;
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } },
+        audio: false
+      });
+      videoEl.srcObject = stream;
+      await videoEl.play();
+      resizeCanvasToVideo();
+    } catch (err) {
+      permissionError.textContent = 'Camera access was blocked or is unavailable. Allow camera permission for this page and try again.';
+      permissionError.style.display = 'block';
+      startBtn.disabled = false;
+      return;
+    }
+
+    faceMesh = new FaceMesh({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+    faceMesh.onResults(onResults);
+
+    camera = new Camera(videoEl, {
+      onFrame: async () => {
+        resizeCanvasToVideo();
+        await faceMesh.send({ image: videoEl });
+      },
+      width: 720,
+      height: 960
+    });
+    camera.start();
+
+    running = true;
+    startOverlay.classList.add('hidden');
+    statusLine.style.display = 'flex';
+    stopBtn.disabled = false;
+    snapshotBtn.disabled = false;
+  }
+
+  function stop() {
+    running = false;
+    if (camera) { camera.stop(); camera = null; }
+    const stream = videoEl.srcObject;
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      videoEl.srcObject = null;
+    }
+    ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+    startOverlay.classList.remove('hidden');
+    statusLine.style.display = 'none';
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    snapshotBtn.disabled = true;
+  }
+
+  function snapshot() {
+    if (!running) return;
+    const link = document.createElement('a');
+    link.download = 'leidmann-tryon-' + Date.now() + '.png';
+    link.href = canvasEl.toDataURL('image/png');
+    link.click();
+  }
+
+  startBtn.addEventListener('click', start);
+  stopBtn.addEventListener('click', stop);
+  snapshotBtn.addEventListener('click', snapshot);
+})();
+</script>
+</body>
+</html>
