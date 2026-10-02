@@ -146,7 +146,7 @@
   // Landmarks that do not move with expression (forehead, nose, eye corners, cheekbones, temples).
   const EAR_ROOT = (() => {
     const a = REF[127], b = REF[356];
-    return [(Math.abs(a[0]) + Math.abs(b[0])) / 2, (a[1] + b[1]) / 2 + 6, (a[2] + b[2]) / 2 - 12];
+    return [(Math.abs(a[0]) + Math.abs(b[0])) / 2, (a[1] + b[1]) / 2 + 5, (a[2] + b[2]) / 2 - 20];
   })();
   const RIGID = [10,151,9,8,168,6,197,195,5,4,1,2,98,327,33,133,362,263,116,345,123,352,127,356,234,454,21,251,54,284,103,332,67,297,109,338,226,446,31,261,229,449];
   const SEAT_DROP_MM = 1.5;      // real frames rest slightly lower on the nose than the bridge landmark
@@ -304,17 +304,53 @@
     const temples = [-1, 1].map(side => {
       const g = makeTempleGeometry();
       const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({
-        map: templeTex, alphaMap: fadeTex, transparent: true, side: THREE.DoubleSide }));
+        map: templeTex, alphaMap: fadeTex, transparent: true, side: THREE.DoubleSide,
+        emissive: 0xffffff, emissiveMap: templeTex, emissiveIntensity: 0.28 }));
       m.renderOrder = 5;
       m.frustumCulled = false;
       m.userData.side = side;
       group.add(m);
+      const sh = new THREE.Mesh(makeShadowGeometry(), new THREE.MeshBasicMaterial({
+        color: 0x000000, alphaMap: shadowTex, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide }));
+      sh.renderOrder = 4;
+      sh.frustumCulled = false;
+      group.add(sh);
+      m.userData.shadow = sh;
       return m;
     });
 
     group.visible = false;
     head.add(group);
     models[key] = { f, group, frontGroup, temples };
+  }
+
+  // soft shadow the arm casts onto the side of the head
+  const shadowTex = (() => {
+    const c = document.createElement('canvas'); c.width = 128; c.height = 64;
+    const x = c.getContext('2d');
+    const img = x.createImageData(128, 64);
+    for (let j = 0; j < 64; j++) for (let i = 0; i < 128; i++) {
+      const u = i / 127, v = j / 63;                       // v = 0 right under the arm
+      const along = Math.min(1, u / 0.12) * Math.min(1, (1 - u) / 0.25);
+      const a = Math.pow(1 - v, 1.6) * along;
+      const k = (j * 128 + i) * 4; img.data[k] = img.data[k + 1] = img.data[k + 2] = Math.round(a * 255); img.data[k + 3] = 255;
+    }
+    x.putImageData(img, 0, 0);
+    return new THREE.CanvasTexture(c);
+  })();
+  const SH_SEG = 11;
+  function makeShadowGeometry() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(SH_SEG * 2 * 3), 3));
+    const uv = new Float32Array(SH_SEG * 2 * 2), idx = [];
+    for (let s = 0; s < SH_SEG; s++) {
+      uv[s * 4] = s / (SH_SEG - 1); uv[s * 4 + 1] = 0;
+      uv[s * 4 + 2] = s / (SH_SEG - 1); uv[s * 4 + 3] = 1;
+      if (s < SH_SEG - 1) { const a = s * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    }
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    return g;
   }
 
   // Temple = a rounded bar swept along hinge → top of the ear → down behind the ear.
@@ -394,6 +430,18 @@
     }
     mesh.geometry.attributes.position.needsUpdate = true;
     mesh.geometry.attributes.normal.needsUpdate = true;
+
+    // shadow ribbon: on the skin just inside and below the straight part of the arm
+    const sp = mesh.userData.shadow.geometry.attributes.position.array;
+    for (let s = 0; s < SH_SEG; s++) {
+      const p = pts[s], t = s / (SH_SEG - 1);
+      const hh = (h0 + (h1 - h0) * Math.min(1, t * 1.3)) / 2;
+      const x = p[0] - side * (f.templeT / 2 + 1.2);
+      const yTop = p[1] - hh * 0.55;
+      sp[s * 6] = x; sp[s * 6 + 1] = yTop; sp[s * 6 + 2] = p[2];
+      sp[s * 6 + 3] = x - side * 1.5; sp[s * 6 + 4] = yTop - 6.5; sp[s * 6 + 5] = p[2];
+    }
+    mesh.userData.shadow.geometry.attributes.position.needsUpdate = true;
   }
 
   // ---------------------------------------------------------------- smoothing (One Euro filter)
