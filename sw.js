@@ -1,5 +1,5 @@
 // Keeps the whole try-on demo on the device after the first visit, so it runs without internet.
-const CACHE = 'leidmann-tryon-v2';
+const CACHE = 'leidmann-tryon-v3';
 const FILES = [
   './', 'index.html', 'lib/three.min.js',
   'lib/face_mesh/face_mesh.js',
@@ -31,7 +31,7 @@ self.addEventListener('fetch', e => {
   if (url.origin !== location.origin) return;
   const isPage = req.mode === 'navigate' || url.pathname.endsWith('/') || url.pathname.endsWith('.html');
   if (isPage) {
-    e.respondWith(fetch(req).then(res => {
+    e.respondWith(fetch(req, { cache: 'no-store' }).then(res => {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(req, copy));
       return res;

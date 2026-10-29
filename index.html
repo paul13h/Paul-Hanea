@@ -126,7 +126,7 @@
     <strong>What this is:</strong> live face tracking in the browser, with the Matsuda M1042 and Jacques Marie Mage Dealan built from leidmann.com product photography and placed in 3D on your head — the front sits on the bridge of your nose at its real width (144&nbsp;mm and 143&nbsp;mm), and the temples run back to your ears, so turn your head to see them from the side. Size is estimated from average eye spacing, so it can be off by a few percent on very narrow or wide faces. A production version would use the same pipeline across the whole catalogue.
   </div>
 
-  <footer>Prototype build · runs entirely in this browser · no data leaves your device</footer>
+  <footer>Prototype build v3 · runs entirely in this browser · no data leaves your device</footer>
 </div>
 
 <script src="lib/three.min.js"></script>
@@ -901,6 +901,8 @@
 
   // offline: cache the whole demo after the first visit
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded && !running) { reloaded = true; location.reload(); } });
     navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(() => {
       readyLine.textContent = 'Saved on this device · works without internet';
       readyLine.classList.add('ok');
