@@ -1,5 +1,5 @@
 // Keeps the whole try-on demo on the device after the first visit, so it runs without internet.
-const CACHE = 'leidmann-tryon-v4';
+const CACHE = 'leidmann-tryon-v5';
 const FILES = [
   './', 'index.html', 'lib/three.min.js',
   'lib/face_mesh/face_mesh.js',

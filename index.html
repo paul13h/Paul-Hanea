@@ -126,7 +126,7 @@
     <strong>What this is:</strong> live face tracking in the browser, with the Matsuda M1042 and Jacques Marie Mage Dealan built from leidmann.com product photography and placed in 3D on your head — the front sits on the bridge of your nose at its real width (144&nbsp;mm and 143&nbsp;mm), and the temples run back to your ears, so turn your head to see them from the side. Size is estimated from average eye spacing, so it can be off by a few percent on very narrow or wide faces. A production version would use the same pipeline across the whole catalogue.
   </div>
 
-  <footer>Prototype build v4 · runs entirely in this browser · no data leaves your device</footer>
+  <footer>Prototype build v5 · runs entirely in this browser · no data leaves your device</footer>
 </div>
 
 <script src="lib/three.min.js"></script>
@@ -173,7 +173,7 @@
   // Landmarks that do not move with expression (forehead, nose, eye corners, cheekbones, temples).
   const EAR_ROOT = (() => {
     const a = REF[127], b = REF[356];
-    return [(Math.abs(a[0]) + Math.abs(b[0])) / 2, (a[1] + b[1]) / 2 + 5, (a[2] + b[2]) / 2 - 20];
+    return [(Math.abs(a[0]) + Math.abs(b[0])) / 2, (a[1] + b[1]) / 2 + 5, (a[2] + b[2]) / 2 - 27];
   })();
   const RIGID = [10,151,9,8,168,6,197,195,5,4,1,2,98,327,33,133,362,263,116,345,123,352,127,356,234,454,21,251,54,284,103,332,67,297,109,338,226,446,31,261,229,449];
   const SEAT_DROP_MM = 1.5;      // real frames rest slightly lower on the nose than the bridge landmark
@@ -314,7 +314,7 @@
     frontGroup.add(bodyMesh);
 
     const front = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-      map: tex(f.front), transparent: true, depthTest: false, depthWrite: false }));
+      map: tex(f.front), transparent: true, depthTest: true, depthWrite: false }));
     front.position.set(0, centerY, 0.02);
     front.renderOrder = 30;
     frontGroup.add(front);
@@ -340,6 +340,7 @@
       const sh = new THREE.Mesh(makeShadowGeometry(), new THREE.MeshBasicMaterial({
         color: 0x000000, alphaMap: shadowTex, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide }));
       sh.renderOrder = 4;
+      sh.visible = false;   // the skin shadow rendered as a pale band on some GPUs
       sh.frustumCulled = false;
       group.add(sh);
       m.userData.shadow = sh;
@@ -570,7 +571,8 @@
     const s = Math.sqrt(pp / qq);
     const Rq = [dot(R[0], qc), dot(R[1], qc), dot(R[2], qc)];
     const origin = [pc[0] - s * Rq[0], pc[1] - s * Rq[1], 0];
-    return { xAxis: [R[0][0], R[1][0], R[2][0]], yAxis: [R[0][1], R[1][1], R[2][1]], s, origin };
+    const oz = pc[2] - s * Rq[2];
+    return { xAxis: [R[0][0], R[1][0], R[2][0]], yAxis: [R[0][1], R[1][1], R[2][1]], s, origin, oz };
   }
 
   // ---------------------------------------------------------------- state
@@ -656,11 +658,13 @@
     // face-surface occluder, pulled slightly inward so it never clips the near temple
     if (faceOcc) {
       const arr = faceOcc.geometry.attributes.position.array;
+      // the person's own face surface, pulled ~4 mm inward so it only hides what is clearly behind the nose/cheek
+      const C = [origin[0] - s * 70 * zAxis[0], origin[1] - s * 70 * zAxis[1], origin[2] - s * 70 * zAxis[2]];
       for (let i = 0; i < 468; i++) {
-        const r = OCC_REF[i];
-        arr[i * 3]     = origin[0] + s * (xAxis[0] * r[0] + yAxis[0] * r[1] + zAxis[0] * r[2]);
-        arr[i * 3 + 1] = origin[1] + s * (xAxis[1] * r[0] + yAxis[1] * r[1] + zAxis[1] * r[2]);
-        arr[i * 3 + 2] = origin[2] + s * (xAxis[2] * r[0] + yAxis[2] * r[1] + zAxis[2] * r[2]);
+        const P = [lms[i].x * w, -lms[i].y * h, -lms[i].z * w - pose.oz];
+        arr[i * 3]     = C[0] + 0.955 * (P[0] - C[0]);
+        arr[i * 3 + 1] = C[1] + 0.955 * (P[1] - C[1]);
+        arr[i * 3 + 2] = C[2] + 0.955 * (P[2] - C[2]);
       }
       faceOcc.geometry.attributes.position.needsUpdate = true;
       faceOcc.visible = true;
@@ -677,9 +681,16 @@
     model.frontGroup.position.z = f.depthMM - 1 - hingeY * Math.sin(PANTO_TILT);
     // The temple on the side turned toward the camera sits outside the face, so it is never hidden;
     // the far one is depth-tested against the face and skull occluders.
+    {
+      const hsY = i => { const q = [lms[i].x * w - origin[0], -lms[i].y * h - origin[1], -lms[i].z * w - pose.oz];
+        return (yAxis[0] * q[0] + yAxis[1] * q[1] + yAxis[2] * q[2]) / s; };
+      const y = (0.35 * (hsY(127) + hsY(356)) + 0.65 * (hsY(162) + hsY(389))) / 2;
+      const target = Math.min(18, Math.max(4, y));
+      EAR_ROOT[1] += (target - EAR_ROOT[1]) * 0.15;
+    }
     ears.forEach(e => {
       e.scale.set(9, 27, 14);
-      e.position.set(e.userData.side * (EAR_ROOT[0] + 6), EAR_ROOT[1] - 16, EAR_ROOT[2] - 9);
+      e.position.set(e.userData.side * (EAR_ROOT[0] + 6), EAR_ROOT[1] - 16, EAR_ROOT[2] - 13);
     });
     model.temples.forEach(m => updateTemple(m, f, EAR_ROOT[0]));
 
