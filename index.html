@@ -126,7 +126,7 @@
     <strong>What this is:</strong> live face tracking in the browser, with the Matsuda M1042 and Jacques Marie Mage Dealan built from leidmann.com product photography and placed in 3D on your head — the front sits on the bridge of your nose at its real width (144&nbsp;mm and 143&nbsp;mm), and the temples run back to your ears, so turn your head to see them from the side. Size is estimated from average eye spacing, so it can be off by a few percent on very narrow or wide faces. A production version would use the same pipeline across the whole catalogue.
   </div>
 
-  <footer>Prototype build v3 · runs entirely in this browser · no data leaves your device</footer>
+  <footer>Prototype build v4 · runs entirely in this browser · no data leaves your device</footer>
 </div>
 
 <script src="lib/three.min.js"></script>
@@ -616,6 +616,16 @@
     const t = performance.now();
 
     const pose = fitPose(lms, w, h);
+    // Lock the frame's tilt to the eyes: average of the outer-corner and inner-corner lines.
+    {
+      const ang = (a, b) => Math.atan2(-(lms[b].y - lms[a].y) * h, (lms[b].x - lms[a].x) * w);
+      const a1 = ang(33, 263), a2 = ang(133, 362);
+      const target = Math.atan2(Math.sin(a1) + Math.sin(a2), Math.cos(a1) + Math.cos(a2));
+      const d = target - Math.atan2(pose.xAxis[1], pose.xAxis[0]);
+      const c = Math.cos(d), sn = Math.sin(d);
+      const rot = v => [v[0] * c - v[1] * sn, v[0] * sn + v[1] * c, v[2]];
+      pose.xAxis = rot(pose.xAxis); pose.yAxis = rot(pose.yAxis);
+    }
     if (window.__tryon) window.__tryon.last = { lms, pose, w, h };
     let { xAxis, yAxis, s, origin } = pose;
     let zAxis;
@@ -902,7 +912,8 @@
   // offline: cache the whole demo after the first visit
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     let reloaded = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded && !running) { reloaded = true; location.reload(); } });
+    const hadController = !!navigator.serviceWorker.controller;   // only reload for an update, never on the first visit
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded && !running && !startBtn.disabled) { reloaded = true; location.reload(); } });
     navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(() => {
       readyLine.textContent = 'Saved on this device · works without internet';
       readyLine.classList.add('ok');
