@@ -56,6 +56,15 @@
   .frame-btn .ref { display: block; font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
 
+  .stage:fullscreen { max-height: none; border-radius: 0; box-shadow: none; }
+  .stage-frames { position: absolute; left: 0; right: 0; bottom: 18px; display: none; justify-content: center; gap: 8px; }
+  .stage:fullscreen .stage-frames { display: flex; }
+  .stage-frames button { appearance: none; border: 1px solid rgba(255,255,255,0.35); background: rgba(17,17,17,0.55); color: #f4efe8;
+    font-size: 14px; padding: 10px 18px; border-radius: 999px; cursor: pointer; backdrop-filter: blur(3px); }
+  .stage-frames button.active { background: #f4efe8; color: var(--brown-deep); border-color: #f4efe8; }
+  .stage:fullscreen .status-line { top: 18px; }
+  .ready { text-align: center; margin-top: 10px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); min-height: 14px; }
+  .ready.ok { color: #4f7a5c; }
   .toolbar { display: flex; justify-content: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
   button.ghost { appearance: none; border: 1px solid var(--line); background: transparent; color: var(--ink-soft); font-size: 13px;
     padding: 9px 16px; border-radius: 999px; cursor: pointer; }
@@ -91,6 +100,7 @@
       <button class="primary" id="startBtn">Start camera</button>
       <p id="permissionError" style="color:#e8b3ac; font-size:12px; display:none;"></p>
     </div>
+    <div class="stage-frames" id="stageFrames"></div>
   </div>
 
   <div class="controls" id="frameControls">
@@ -106,8 +116,11 @@
 
   <div class="toolbar">
     <button class="ghost" id="snapshotBtn" disabled>Save snapshot</button>
+    <button class="ghost" id="fullscreenBtn">Fullscreen</button>
+    <button class="ghost" id="cameraBtn" style="display:none;">Switch camera</button>
     <button class="ghost" id="stopBtn" disabled>Stop camera</button>
   </div>
+  <p class="ready" id="readyLine"></p>
 
   <div class="note">
     <strong>What this is:</strong> live face tracking in the browser, with the Matsuda M1042 and Jacques Marie Mage Dealan built from leidmann.com product photography and placed in 3D on your head — the front sits on the bridge of your nose at its real width (144&nbsp;mm and 143&nbsp;mm), and the temples run back to your ears, so turn your head to see them from the side. Size is estimated from average eye spacing, so it can be off by a few percent on very narrow or wide faces. A production version would use the same pipeline across the whole catalogue.
@@ -116,8 +129,8 @@
   <footer>Prototype build · runs entirely in this browser · no data leaves your device</footer>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+<script src="lib/three.min.js"></script>
+<script src="lib/face_mesh/face_mesh.js"></script>
 <script>
 (function () {
   "use strict";
@@ -649,44 +662,100 @@
     if (!running) return;
     if (!busy && videoEl.readyState >= 2) {
       busy = true;
-      try { await faceMesh.send({ image: videoEl }); } catch (e) { console.error(e); }
+      try { await faceMesh.send({ image: videoEl }); sendErrors = 0; }
+      catch (e) { console.error(e); if (++sendErrors > 15) await recoverTracker(); }
       busy = false;
     }
     requestAnimationFrame(loop);
   }
 
+  // Load the tracking model as soon as the page opens, so "Start camera" is instant.
+  let modelReady = null;
+  function ensureFaceMesh() {
+    if (!faceMesh) {
+      faceMesh = new FaceMesh({ locateFile: file => `lib/face_mesh/${file}` });
+      faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+      faceMesh.onResults(onResults);
+      modelReady = faceMesh.initialize();
+    }
+    return modelReady;
+  }
+
+  let wakeLock = null;
+  async function holdScreenOn() {
+    try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && running) holdScreenOn(); });
+
+  let cameras = [], cameraIdx = -1;
+  async function listCameras() {
+    try {
+      cameras = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      cameraBtn.style.display = cameras.length > 1 ? '' : 'none';
+    } catch (e) { cameras = []; }
+  }
+
+  function showError(msg) {
+    permissionError.textContent = msg;
+    permissionError.style.display = 'block';
+  }
+
+  async function openCamera() {
+    const video = cameraIdx >= 0 && cameras[cameraIdx]
+      ? { deviceId: { exact: cameras[cameraIdx].deviceId }, width: { ideal: 1280 }, height: { ideal: 960 } }
+      : { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } };
+    const st = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = st;
+    // a camera that is unplugged or taken by another app ends the track: go back to the start screen cleanly
+    stream.getVideoTracks().forEach(t => t.addEventListener('ended', () => {
+      if (stream === st) { stop(); showError('The camera disconnected. Press "Start camera" to continue.'); }
+    }));
+    videoEl.srcObject = stream;
+    await videoEl.play();
+  }
+
   async function start() {
+    if (running) return;
     startBtn.disabled = true;
     permissionError.style.display = 'none';
     if (typeof FaceMesh === 'undefined' || typeof THREE === 'undefined') {
-      permissionError.textContent = 'Tracking library failed to load. Check your internet connection and reload the page.';
-      permissionError.style.display = 'block';
+      showError('The tracking library did not load. Reload the page.');
       startBtn.disabled = false;
       return;
     }
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } }, audio: false
-      });
-      videoEl.srcObject = stream;
-      await videoEl.play();
+      await openCamera();
     } catch (err) {
-      permissionError.textContent = 'Camera access was blocked or is unavailable. Allow camera permission for this page and try again.';
-      permissionError.style.display = 'block';
+      const blocked = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+      const busyCam = err && (err.name === 'NotReadableError' || err.name === 'AbortError');
+      showError(blocked ? 'Camera access is blocked. Allow the camera for this page (icon in the address bar) and try again.'
+        : busyCam ? 'The camera is in use by another app (Zoom, FaceTime, Teams…). Close it and try again.'
+        : 'No camera was found. Connect one and try again.');
       startBtn.disabled = false;
       return;
     }
-    if (!faceMesh) {
-      faceMesh = new FaceMesh({ locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}` });
-      faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
-      faceMesh.onResults(onResults);
-    }
+    listCameras();
+    startBtn.textContent = 'Loading…';
+    try { await ensureFaceMesh(); } catch (e) { console.error(e); }
+    startBtn.textContent = 'Start camera';
     running = true;
+    sendErrors = 0;
     startOverlay.classList.add('hidden');
     statusLine.style.display = 'flex';
     stopBtn.disabled = false;
     snapshotBtn.disabled = false;
+    holdScreenOn();
     loop();
+  }
+
+  // If the tracker throws repeatedly (GPU hiccup, lost WebGL context), rebuild it instead of freezing.
+  let sendErrors = 0;
+  async function recoverTracker() {
+    try { if (faceMesh) await faceMesh.close(); } catch (e) {}
+    faceMesh = null;
+    sendErrors = 0;
+    try { await ensureFaceMesh(); } catch (e) { console.error(e); }
   }
 
   function stop() {
@@ -700,6 +769,25 @@
     startBtn.disabled = false;
     stopBtn.disabled = true;
     snapshotBtn.disabled = true;
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  }
+
+  async function switchCamera() {
+    await listCameras();
+    if (cameras.length < 2) return;
+    const curId = stream && stream.getVideoTracks()[0] && stream.getVideoTracks()[0].getSettings().deviceId;
+    const cur = cameras.findIndex(c => c.deviceId === curId);
+    cameraIdx = (cur + 1) % cameras.length;
+    if (running) {
+      try { await openCamera(); } catch (e) { cameraIdx = cur; showError('Could not open that camera.'); }
+    }
+  }
+
+  function toggleFullscreen() {
+    const stage = document.getElementById('stage');
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else if (stage.requestFullscreen) stage.requestFullscreen().catch(() => {});
+    else if (stage.webkitRequestFullscreen) stage.webkitRequestFullscreen();
   }
 
   function snapshot() {
@@ -723,6 +811,50 @@
   startBtn.addEventListener('click', start);
   stopBtn.addEventListener('click', stop);
   snapshotBtn.addEventListener('click', snapshot);
+  const fullscreenBtn = document.getElementById('fullscreenBtn');
+  const cameraBtn = document.getElementById('cameraBtn');
+  const readyLine = document.getElementById('readyLine');
+  fullscreenBtn.addEventListener('click', toggleFullscreen);
+  cameraBtn.addEventListener('click', switchCamera);
+
+  // frame chips inside the stage, shown in fullscreen
+  const stageFrames = document.getElementById('stageFrames');
+  Object.keys(FRAMES).forEach(k => {
+    const b = document.createElement('button');
+    b.textContent = FRAMES[k].label; b.dataset.frame = k;
+    b.addEventListener('click', e => { e.stopPropagation(); setFrame(k); });
+    stageFrames.appendChild(b);
+  });
+  const syncChips = () => stageFrames.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.frame === currentKey));
+  frameButtons.forEach(btn => btn.addEventListener('click', syncChips));
+  syncChips();
+
+  // keyboard: 1/2 or arrows switch frames, F fullscreen, S snapshot, space start/stop, C camera
+  document.addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const keys = Object.keys(FRAMES);
+    const k = e.key.toLowerCase();
+    if (/^[1-9]$/.test(k) && keys[+k - 1]) { setFrame(keys[+k - 1]); syncChips(); }
+    else if (k === 'arrowright' || k === 'arrowleft') {
+      const i = keys.indexOf(currentKey), d = k === 'arrowright' ? 1 : -1;
+      setFrame(keys[(i + d + keys.length) % keys.length]); syncChips();
+    }
+    else if (k === 'f') toggleFullscreen();
+    else if (k === 's') snapshot();
+    else if (k === 'c') switchCamera();
+    else if (k === ' ') { e.preventDefault(); running ? stop() : start(); }
+  });
+
+  // warm up the tracker in the background
+  if (typeof FaceMesh !== 'undefined') ensureFaceMesh().catch(e => console.error(e));
+
+  // offline: cache the whole demo after the first visit
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(() => {
+      readyLine.textContent = 'Saved on this device · works without internet';
+      readyLine.classList.add('ok');
+    }).catch(() => {});
+  }
 
   // test hook: render a frame from a still image (used for offline checks)
   window.__tryon = { onResults, setFrame, renderer, scene, camera, models, head };
