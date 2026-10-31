@@ -65,6 +65,31 @@
   .stage:fullscreen .status-line { top: 18px; }
   .ready { text-align: center; margin-top: 10px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); min-height: 14px; }
   .ready.ok { color: #4f7a5c; }
+  /* saved looks + comparison */
+  .tray { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 14px; min-height: 0; }
+  .tray:empty { display: none; }
+  .look { position: relative; width: 92px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: var(--panel); }
+  .look img { display: block; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; }
+  .look span { display: block; font-size: 10px; padding: 4px 6px; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .look button { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(17,17,17,0.6);
+    color: #fff; font-size: 12px; line-height: 20px; cursor: pointer; padding: 0; }
+  .compare { position: fixed; inset: 0; z-index: 50; background: #1a1410; display: none; flex-direction: column; padding: 20px 16px; }
+  .compare.open { display: flex; }
+  .compare-head { display: flex; justify-content: space-between; align-items: center; color: #f4efe8; max-width: 1100px; width: 100%; margin: 0 auto 14px; }
+  .compare-head h2 { font-family: "Playfair Display", Georgia, serif; font-weight: 400; font-size: 22px; margin: 0; }
+  .compare-head button { appearance: none; border: 1px solid rgba(255,255,255,0.4); background: transparent; color: #f4efe8; border-radius: 999px; padding: 8px 16px; cursor: pointer; font-size: 13px; }
+  .compare-grid { flex: 1; display: grid; gap: 14px; max-width: 1100px; width: 100%; margin: 0 auto; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-content: center; overflow: auto; }
+  .compare-grid figure { margin: 0; background: #1c1612; border-radius: 14px; overflow: hidden; }
+  .compare-grid img { display: block; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; }
+  .compare-grid figcaption { padding: 10px 14px; color: #f4efe8; font-size: 14px; display: flex; justify-content: space-between; gap: 10px; }
+  .compare-grid figcaption small { color: #c9b9a6; }
+  /* embedded in a product page */
+  body.embed { padding: 12px 12px 16px; background: #f4efe8; }
+  body.embed header, body.embed .note, body.embed footer, body.embed .ready, body.embed #fullscreenBtn { display: none; }
+  body.embed .wrap { max-width: 760px; }
+  body.embed .stage { max-height: 70vh; }
+  body.embed .controls { margin-top: 12px; gap: 6px; }
+  body.embed .frame-btn { padding: 7px 12px; }
   .toolbar { display: flex; justify-content: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
   button.ghost { appearance: none; border: 1px solid var(--line); background: transparent; color: var(--ink-soft); font-size: 13px;
     padding: 9px 16px; border-radius: 999px; cursor: pointer; }
@@ -110,7 +135,7 @@
     </button>
     <button class="frame-btn" data-frame="jmm">
       <span class="name"><span class="swatch" style="background:#6b4424;"></span>JMM Dealan</span>
-      <span class="ref">Tokyo · €915</span>
+      <span class="ref">Tokyo · €940</span>
     </button>
     <button class="frame-btn" data-frame="cartier">
       <span class="name"><span class="swatch" style="background:#c3c7cd;"></span>Cartier Santos</span>
@@ -131,18 +156,25 @@
   </div>
 
   <div class="toolbar">
+    <button class="ghost" id="saveLookBtn" disabled>Save look</button>
+    <button class="ghost" id="compareBtn" style="display:none;">Compare</button>
     <button class="ghost" id="snapshotBtn" disabled>Save snapshot</button>
     <button class="ghost" id="fullscreenBtn">Fullscreen</button>
     <button class="ghost" id="cameraBtn" style="display:none;">Switch camera</button>
     <button class="ghost" id="stopBtn" disabled>Stop camera</button>
   </div>
+  <div class="tray" id="lookTray"></div>
   <p class="ready" id="readyLine"></p>
+  <div class="compare" id="compareView" role="dialog" aria-modal="true">
+    <div class="compare-head"><h2 id="compareTitle">Side by side</h2><button id="compareClose">Close</button></div>
+    <div class="compare-grid" id="compareGrid"></div>
+  </div>
 
   <div class="note">
     <strong>What this is:</strong> live face tracking in the browser, with six frames from the Leidmann collection (Matsuda, Jacques Marie Mage, Cartier, Kuboraum and Akoni) built from leidmann.com product photography and placed in 3D on your head — the front sits on the bridge of your nose at its real width, taken from each frame’s lens, bridge and temple measurements, and the temples run back to your ears, so turn your head to see them from the side. Size is estimated from average eye spacing, so it can be off by a few percent on very narrow or wide faces. A production version would use the same pipeline across the whole catalogue.
   </div>
 
-  <footer>Prototype build v7 · runs entirely in this browser · no data leaves your device</footer>
+  <footer>Prototype build v8 · runs entirely in this browser · no data leaves your device</footer>
 </div>
 
 <script src="lib/three.min.js"></script>
@@ -645,6 +677,7 @@
 
   // ---------------------------------------------------------------- state
   let currentKey = 'matsuda';
+  let lastFace = null;
   let faceMesh = null, stream = null, running = false, busy = false;
   let W = 720, H = 960;
 
@@ -697,6 +730,7 @@
       pose.xAxis = rot(pose.xAxis); pose.yAxis = rot(pose.yAxis);
     }
     if (window.__tryon) window.__tryon.last = { lms, pose, w, h };
+    lastFace = { x: pose.origin[0], y: -pose.origin[1], s: pose.s, w, h };
     let { xAxis, yAxis, s, origin } = pose;
     let zAxis;
     let earHalf = (Math.abs(REF[234][0]) + Math.abs(REF[454][0])) / 2;
@@ -916,15 +950,16 @@
       return;
     }
     listCameras();
-    startBtn.textContent = 'Loading…';
+    startBtn.textContent = T('Loading…');
     try { await ensureFaceMesh(); } catch (e) { console.error(e); }
-    startBtn.textContent = 'Start camera';
+    startBtn.textContent = T('Start camera');
     running = true;
     sendErrors = 0;
     startOverlay.classList.add('hidden');
     statusLine.style.display = 'flex';
     stopBtn.disabled = false;
     snapshotBtn.disabled = false;
+    saveLookBtn.disabled = false;
     holdScreenOn();
     loop();
   }
@@ -949,6 +984,7 @@
     startBtn.disabled = false;
     stopBtn.disabled = true;
     snapshotBtn.disabled = true;
+    saveLookBtn.disabled = true;
     if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
   }
 
@@ -970,14 +1006,78 @@
     else if (stage.webkitRequestFullscreen) stage.webkitRequestFullscreen();
   }
 
-  function snapshot() {
-    if (!running) return;
+  function composite() {
     const c = document.createElement('canvas');
     c.width = bgCanvas.width; c.height = bgCanvas.height;
     const x = c.getContext('2d');
     x.translate(c.width, 0); x.scale(-1, 1);   // match the mirrored view
     x.drawImage(bgCanvas, 0, 0);
     x.drawImage(glCanvas, 0, 0);
+    return c;
+  }
+
+  // ---------------------------------------------------------------- saved looks & side-by-side comparison
+  const looks = [];
+  const lookTray = document.getElementById('lookTray');
+  const saveLookBtn = document.getElementById('saveLookBtn');
+  const compareBtn = document.getElementById('compareBtn');
+  const compareView = document.getElementById('compareView');
+  const compareGrid = document.getElementById('compareGrid');
+  function frameInfo(key) {
+    const b = document.querySelector('.frame-btn[data-frame="' + key + '"]');
+    return { name: b ? b.querySelector('.name').textContent.trim() : FRAMES[key].label, ref: b ? b.querySelector('.ref').textContent.trim() : '' };
+  }
+  function saveLook() {
+    if (!running) return;
+    const full = composite();
+    // frame the head: a 4:5 crop around the face, so looks line up when compared
+    let sx = 0, sy = 0, sw = full.width, sh = full.height;
+    if (lastFace) {
+      sw = Math.min(full.width, 230 * lastFace.s); sh = Math.min(full.height, sw * 1.25); sw = sh / 1.25;
+      const cx = full.width - lastFace.x, cy = lastFace.y + 18 * lastFace.s;
+      sx = Math.max(0, Math.min(full.width - sw, cx - sw / 2)); sy = Math.max(0, Math.min(full.height - sh, cy - sh * 0.48));
+    }
+    const c = document.createElement('canvas'); c.width = 480; c.height = 600;
+    c.getContext('2d').drawImage(full, sx, sy, sw, sh, 0, 0, 480, 600);
+    looks.push({ key: currentKey, url: c.toDataURL('image/jpeg', 0.9) });
+    if (looks.length > 4) looks.shift();
+    renderLooks();
+    saveLookBtn.textContent = T('Saved ✓');
+    setTimeout(() => { saveLookBtn.textContent = T('Save look'); }, 900);
+  }
+  function renderLooks() {
+    lookTray.innerHTML = '';
+    looks.forEach((l, i) => {
+      const d = document.createElement('div'); d.className = 'look';
+      d.innerHTML = '<img alt=""><span></span><button aria-label="Remove">×</button>';
+      d.querySelector('img').src = l.url;
+      d.querySelector('span').textContent = frameInfo(l.key).name;
+      d.querySelector('img').addEventListener('click', () => { setFrame(l.key); syncChips && syncChips(); });
+      d.querySelector('button').addEventListener('click', () => { looks.splice(i, 1); renderLooks(); });
+      lookTray.appendChild(d);
+    });
+    compareBtn.style.display = looks.length >= 2 ? '' : 'none';
+    compareBtn.textContent = T('Compare') + ' (' + looks.length + ')';
+  }
+  function openCompare() {
+    if (looks.length < 2) return;
+    compareGrid.innerHTML = '';
+    looks.forEach(l => {
+      const info = frameInfo(l.key);
+      const f = document.createElement('figure');
+      f.innerHTML = '<img alt=""><figcaption><span></span><small></small></figcaption>';
+      f.querySelector('img').src = l.url;
+      f.querySelector('span').textContent = info.name;
+      f.querySelector('small').textContent = info.ref;
+      compareGrid.appendChild(f);
+    });
+    compareView.classList.add('open');
+  }
+  function closeCompare() { compareView.classList.remove('open'); }
+
+  function snapshot() {
+    if (!running) return;
+    const c = composite();
     const link = document.createElement('a');
     link.download = 'leidmann-tryon-' + Date.now() + '.png';
     link.href = c.toDataURL('image/png');
@@ -987,7 +1087,39 @@
   // ---------------------------------------------------------------- boot
   Object.keys(FRAMES).forEach(buildModel);
   buildFaceOccluder();
-  setFrame('matsuda');
+  // ---------------------------------------------------------------- URL options: ?frame=p20&embed=1&lang=de
+  const params = new URLSearchParams(location.search);
+  const LANG = (params.get('lang') || '').toLowerCase();
+  const DE = {
+    'Start camera': 'Kamera starten', 'Save snapshot': 'Foto speichern', 'Fullscreen': 'Vollbild', 'Switch camera': 'Kamera wechseln',
+    'Stop camera': 'Kamera stoppen', 'Save look': 'Look merken', 'Saved ✓': 'Gemerkt ✓', 'Compare': 'Vergleichen', 'Close': 'Schließen',
+    'Side by side': 'Ihre Looks im Vergleich', 'Tracking': 'Erkannt', 'Searching for face…': 'Gesicht wird gesucht…', 'Loading…': 'Lädt…'
+  };
+  function T(t) { return LANG === 'de' && DE[t] ? DE[t] : t; }
+  if (LANG === 'de') {
+    document.documentElement.lang = 'de';
+    [['startBtn', 'Start camera'], ['snapshotBtn', 'Save snapshot'], ['fullscreenBtn', 'Fullscreen'], ['cameraBtn', 'Switch camera'],
+     ['stopBtn', 'Stop camera'], ['saveLookBtn', 'Save look'], ['compareClose', 'Close'], ['compareTitle', 'Side by side']]
+      .forEach(([id, t]) => { const el = document.getElementById(id); if (el) el.textContent = T(t); });
+    const REF_DE = { matsuda: 'Flaschengrün · € 725', jmm: 'Tokyo · € 940', cartier: 'Silber · Blau · € 1.100', z17: 'Bronze · € 450', p20: 'Schildpatt · € 550', spitzer: 'Palladium · € 880' };
+    document.querySelectorAll('.frame-btn').forEach(b => { const r = b.querySelector('.ref'); if (r && REF_DE[b.dataset.frame]) r.textContent = REF_DE[b.dataset.frame]; });
+    const ov = startOverlay.querySelectorAll('p');
+    if (ov[0]) ov[0].textContent = 'Sehen Sie die Brille an sich – bevor Sie bestellen.';
+    if (ov[1]) ov[1].textContent = 'Ihre Kamera wird nur hier im Browser genutzt. Nichts wird aufgezeichnet oder hochgeladen.';
+  }
+  const _setTracking = setTracking;
+  setTracking = found => { _setTracking(found); trackingStatus.textContent = T(found ? 'Tracking' : 'Searching for face…'); };
+  const EMBED = params.get('embed') === '1';
+  if (EMBED) document.body.classList.add('embed');
+  const startKey = FRAMES[params.get('frame')] ? params.get('frame') : 'matsuda';
+  setFrame(startKey);
+  // tell a host page which frame is on, so it can follow along
+  const _setFrameForHost = setFrame;
+  setFrame = key => { _setFrameForHost(key); if (window.parent !== window) window.parent.postMessage({ type: 'tryon-frame', key }, '*'); };
+  window.addEventListener('message', e => {
+    if (e.data && e.data.type === 'tryon-set-frame' && FRAMES[e.data.key]) { setFrame(e.data.key); syncChips(); }
+    if (e.data && e.data.type === 'tryon-stop') stop();
+  });
   startBtn.addEventListener('click', start);
   stopBtn.addEventListener('click', stop);
   snapshotBtn.addEventListener('click', snapshot);
@@ -995,6 +1127,10 @@
   const cameraBtn = document.getElementById('cameraBtn');
   const readyLine = document.getElementById('readyLine');
   fullscreenBtn.addEventListener('click', toggleFullscreen);
+  saveLookBtn.addEventListener('click', saveLook);
+  compareBtn.addEventListener('click', openCompare);
+  document.getElementById('compareClose').addEventListener('click', closeCompare);
+  compareView.addEventListener('click', e => { if (e.target === compareView) closeCompare(); });
   cameraBtn.addEventListener('click', switchCamera);
 
   // frame chips inside the stage, shown in fullscreen
@@ -1021,9 +1157,14 @@
     }
     else if (k === 'f') toggleFullscreen();
     else if (k === 's') snapshot();
+    else if (k === 'm') saveLook();
+    else if (k === 'v') (compareView.classList.contains('open') ? closeCompare() : openCompare());
+    else if (k === 'escape') closeCompare();
     else if (k === 'c') switchCamera();
     else if (k === ' ') { e.preventDefault(); running ? stop() : start(); }
   });
+
+  if (EMBED && params.get('autostart') !== '0') setTimeout(() => start(), 300);
 
   // warm up the tracker in the background
   if (typeof FaceMesh !== 'undefined') ensureFaceMesh().catch(e => console.error(e));

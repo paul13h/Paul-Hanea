@@ -1,7 +1,25 @@
 // Keeps the whole try-on demo on the device after the first visit, so it runs without internet.
-const CACHE = 'leidmann-tryon-v7';
+const CACHE = 'leidmann-tryon-v8';
 const FILES = [
-  './', 'index.html', 'lib/three.min.js',
+  './', 'index.html', 'shop.html', 'lib/three.min.js',
+  'shop/img/cartier_0.jpg',
+  'shop/img/cartier_1.jpg',
+  'shop/img/cartier_2.jpg',
+  'shop/img/jmm_0.jpg',
+  'shop/img/jmm_1.jpg',
+  'shop/img/jmm_2.jpg',
+  'shop/img/matsuda_0.jpg',
+  'shop/img/matsuda_1.jpg',
+  'shop/img/matsuda_2.jpg',
+  'shop/img/p20_0.jpg',
+  'shop/img/p20_1.jpg',
+  'shop/img/spitzer_0.jpg',
+  'shop/img/spitzer_1.jpg',
+  'shop/img/spitzer_2.jpg',
+  'shop/img/z17_0.jpg',
+  'shop/img/z17_1.jpg',
+  'shop/img/z17_2.jpg',
+
   'lib/face_mesh/face_mesh.js',
   'lib/face_mesh/face_mesh.binarypb',
   'lib/face_mesh/face_mesh_solution_packed_assets.data',
@@ -35,9 +53,9 @@ self.addEventListener('fetch', e => {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(req, copy));
       return res;
-    }).catch(() => caches.match(req).then(r => r || caches.match('index.html'))));
+    }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('index.html'))));
   } else {
-    e.respondWith(caches.match(req).then(r => r || fetch(req).then(res => {
+    e.respondWith(caches.match(req, { ignoreSearch: true }).then(r => r || fetch(req).then(res => {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(req, copy));
       return res;

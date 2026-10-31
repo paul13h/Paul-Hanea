@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Konzept: Virtual Try-On für Leidmann</title>
+<style>
+  :root {
+    --bg: #f3efe8;
+    --panel: #fbf9f5;
+    --ink: #2b221c;
+    --ink-soft: #6d6258;
+    --line: #ddd4c8;
+    --green: #2f5a2c;
+    --green-deep: #234421;
+    --brown: #4a3828;
+    --concept: #a9834f;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, "Courier New", monospace;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--serif); }
+  a { color: inherit; }
+  button { font: inherit; }
+
+  /* concept banner: always visible, so the page can't be mistaken for the real shop */
+  .concept { position: sticky; top: 0; z-index: 20; background: var(--brown); color: #f3e9dc; font-family: var(--mono);
+    font-size: 11px; letter-spacing: 0.06em; text-align: center; padding: 7px 12px; text-transform: uppercase; }
+  .concept b { color: #fff; font-weight: 600; }
+
+  header.site { display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; padding: 18px 20px; border-bottom: 1px solid var(--line); background: var(--bg); }
+  .burger, .bag { width: 26px; height: 26px; color: var(--ink); opacity: 0.85; }
+  .word { text-align: center; font-family: var(--serif); font-style: italic; font-size: 30px; letter-spacing: 0.01em; }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 28px 20px 60px; }
+  .product { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 44px; align-items: start; }
+  @media (max-width: 860px) { .product { grid-template-columns: 1fr; gap: 22px; } main { padding-top: 16px; } }
+
+  .gallery { position: relative; }
+  .main-img { position: relative; background: #fff; border-radius: 4px; overflow: hidden; aspect-ratio: 1000 / 520; }
+  .main-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .tryon-pill { position: absolute; left: 14px; bottom: 14px; display: inline-flex; align-items: center; gap: 8px; background: rgba(43,34,28,0.86);
+    color: #fff; border: none; border-radius: 999px; padding: 9px 14px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+  .tryon-pill svg { width: 16px; height: 16px; }
+  .thumbs { display: flex; gap: 10px; margin-top: 10px; }
+  .thumbs button { flex: 0 0 auto; width: 96px; aspect-ratio: 1000 / 520; padding: 0; border: 1px solid var(--line); background: #fff; border-radius: 3px; cursor: pointer; overflow: hidden; }
+  .thumbs button.on { border-color: var(--ink); }
+  .thumbs img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+  .info .vendor { font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-soft); margin: 4px 0 8px; }
+  .info h1 { font-family: var(--mono); font-weight: 400; font-size: clamp(22px, 3vw, 30px); letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 10px; line-height: 1.25; }
+  .price { font-family: var(--mono); font-size: 17px; letter-spacing: 0.04em; margin-bottom: 22px; }
+  .tax { font-size: 12px; color: var(--ink-soft); font-family: var(--serif); }
+
+  .btn-try { width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 15px 18px; border: 1.5px solid var(--ink);
+    background: transparent; color: var(--ink); font-family: var(--mono); font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; }
+  .btn-try:hover { background: var(--ink); color: var(--bg); }
+  .btn-try svg { width: 20px; height: 20px; }
+  .try-note { font-size: 12px; color: var(--ink-soft); margin: 8px 0 14px; line-height: 1.45; }
+  .btn-cart { width: 100%; padding: 16px 18px; border: none; background: var(--green); color: #fff; font-family: var(--mono); font-size: 14px;
+    letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; }
+  .btn-cart:hover { background: var(--green-deep); }
+
+  details { border-top: 1px solid var(--line); padding: 14px 0; }
+  details:last-of-type { border-bottom: 1px solid var(--line); }
+  summary { list-style: none; cursor: pointer; font-family: var(--mono); font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; display: flex; justify-content: space-between; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; font-size: 16px; }
+  details[open] summary::after { content: "–"; }
+  .acc { margin-top: 12px; font-size: 15px; line-height: 1.6; white-space: pre-line; }
+  .measures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+  .measures div { background: var(--panel); border: 1px solid var(--line); padding: 12px; text-align: center; }
+  .measures b { display: block; font-family: var(--mono); font-size: 20px; font-weight: 400; }
+  .measures span { font-size: 12px; color: var(--ink-soft); }
+  .blk { margin-top: 26px; }
+
+  .more { margin-top: 56px; }
+  .more h2 { font-family: var(--mono); font-weight: 400; font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase; margin: 0 0 16px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
+  .card { background: none; border: none; padding: 0; text-align: left; cursor: pointer; color: inherit; }
+  .card .ph { background: #fff; aspect-ratio: 1000 / 520; display: block; position: relative; overflow: hidden; border-radius: 3px; }
+  .card img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .card .ph i { position: absolute; right: 8px; top: 8px; font-style: normal; font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+    background: rgba(43,34,28,0.8); color: #fff; padding: 4px 7px; border-radius: 999px; }
+  .card .t { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 8px; }
+  .card .p { display: block; font-family: var(--mono); font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+
+  footer { text-align: center; font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--ink-soft); padding: 24px 16px 40px; border-top: 1px solid var(--line); }
+
+  /* try-on modal */
+  .modal { position: fixed; inset: 0; z-index: 40; display: none; background: rgba(28,22,18,0.55); backdrop-filter: blur(3px); }
+  .modal.open { display: flex; align-items: center; justify-content: center; padding: 18px; }
+  .sheet { position: relative; width: min(820px, 100%); height: min(940px, 100%); background: #f4efe8; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.35); display: flex; flex-direction: column; }
+  .sheet-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .sheet-head span { font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .sheet-head button { appearance: none; border: none; background: none; font-size: 26px; line-height: 1; cursor: pointer; color: var(--ink); padding: 2px 6px; }
+  .sheet iframe { flex: 1; width: 100%; border: 0; }
+  .sheet-foot { display: flex; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--bg); align-items: center; }
+  .sheet-foot .btn-cart { flex: 1; padding: 13px; }
+  .sheet-foot .sp { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
+  @media (max-width: 600px) { .modal.open { padding: 0; } .sheet { border-radius: 0; height: 100%; } }
+
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px); background: var(--brown); color: #fff; font-family: var(--mono);
+    font-size: 12px; letter-spacing: 0.04em; padding: 11px 16px; border-radius: 999px; opacity: 0; transition: all .25s; z-index: 60; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div class="concept"><b>Konzept-Mock-up</b> · Virtual Try-On für Leidmann · erstellt von Paul Hanea · kein echter Shop, keine Bestellung möglich</div>
+
+<header class="site">
+  <svg class="burger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
+  <div class="word">leidmann</div>
+  <svg class="bag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 8h14l-1 12H6L5 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
+</header>
+
+<main>
+  <section class="product">
+    <div class="gallery">
+      <div class="main-img"><img id="mainImg" alt=""><button class="tryon-pill" id="pillTry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="13" r="3.2"/><circle cx="17" cy="13" r="3.2"/><path d="M10.2 13h3.6M3.8 13 2.5 9.5M20.2 13l1.3-3.5"/></svg>Anprobieren</button></div>
+      <div class="thumbs" id="thumbs"></div>
+    </div>
+    <div class="info">
+      <p class="vendor" id="vendor"></p>
+      <h1 id="title"></h1>
+      <div class="price"><span id="price"></span> <span class="tax">inkl. MwSt.</span></div>
+
+      <button class="btn-try" id="btnTry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h2l1.5-2h6l1.5 2h2A2.5 2.5 0 0 1 21 8.5v9A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.6"/></svg>Virtuell anprobieren</button>
+      <p class="try-note">Live mit Ihrer Kamera, in Originalgröße. Läuft komplett in Ihrem Browser – es wird nichts aufgezeichnet oder hochgeladen.</p>
+      <button class="btn-cart" id="btnCart">In den Warenkorb</button>
+
+      <div class="blk">
+        <details open><summary>Beschreibung</summary><div class="acc" id="desc"></div></details>
+        <details open><summary>Maße</summary>
+          <div class="acc"><span id="sizeLine"></span>
+            <div class="measures"><div><b id="mLens"></b><span>Glasbreite</span></div><div><b id="mBridge"></b><span>Steg</span></div><div><b id="mTemple"></b><span>Bügellänge</span></div></div>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="more">
+    <h2>Weitere Modelle – alle virtuell anprobierbar</h2>
+    <div class="cards" id="cards"></div>
+  </section>
+</main>
+
+<footer>Konzept für Leidmann · Produktdaten und -bilder von leidmann.com · Prototyp von Paul Hanea (TUM)</footer>
+
+<div class="modal" id="modal" aria-hidden="true">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Virtuelle Anprobe">
+    <div class="sheet-head"><span id="sheetTitle">Virtuelle Anprobe</span><button id="closeTry" aria-label="Schließen">×</button></div>
+    <div id="frameHost" style="flex:1; display:flex;"></div>
+    <div class="sheet-foot"><span class="sp" id="sheetPrice"></span><button class="btn-cart" id="sheetCart">In den Warenkorb</button></div>
+  </div>
+</div>
+<div class="toast" id="toast">Nur ein Konzept – hier kann nichts bestellt werden.</div>
+
+<script>
+(function () {
+  "use strict";
+  const P = {
+    matsuda: { vendor: 'Matsuda', title: 'M1042 | Bottle Green', price: 725, imgs: 3, lens: 50, bridge: 24, temple: 145, size: 'Medium', shape: 'Eckig',
+      desc: 'Handgefertigt in Japan\nFassung aus japanischem Acetat in Grün mit blau-grauen Gläsern\nVon Hand poliert für eine besonders glatte Oberfläche\n100 % UV-Schutz' },
+    jmm: { vendor: 'Jacques Marie Mage', title: 'Dealan | Tokyo', price: 940, imgs: 3, lens: 50, bridge: 20, temple: 142, size: 'Medium', shape: 'Eckig',
+      desc: 'Handgefertigt in Japan\nFassung aus 10 mm Havana-Celluloseacetat mit doppelt laminierten Acetatbügeln und orangefarbenen Gläsern\n100 % UV-Schutz' },
+    cartier: { vendor: 'Cartier', title: 'CT0571S | Santos | 002', price: 1100, imgs: 3, lens: 52, bridge: 20, temple: 145, size: 'Medium', shape: 'Eckig',
+      desc: 'Hergestellt in Frankreich\nCartier 0571S\nFassung: Silber\nGläser: Blau' },
+    z17: { vendor: 'Kuboraum', title: 'Z17 | BZ', price: 450, imgs: 3, lens: 39, bridge: 27, temple: 140, size: 'Small', shape: 'Rund',
+      desc: 'Z17 Bronze\nMaterial: Metall & Acetat\nFassung: Bronze\nBügel: Bronze\nGläser: Lila' },
+    p20: { vendor: 'Kuboraum', title: 'P20 | TOR', price: 550, imgs: 2, lens: 51, bridge: 19, temple: 145, size: 'Medium', shape: 'Eckig',
+      desc: 'P20 Tortoise\nBügel: Violett & Schwarz\nGlas: Violett\nMaterial: Acetat' },
+    spitzer: { vendor: 'Akoni', title: 'Spitzer | Brushed Shiny Palladium', price: 880, imgs: 3, lens: 54, bridge: 18, temple: 142, size: 'Wide', shape: 'Aviator',
+      desc: 'Hergestellt in Japan\nFassung: Japanisches Acetat\nBügel: Japanisches Acetat\nGlas: Tief smaragdgrün' }
+  };
+  const fmt = v => '€ ' + v.toLocaleString('de-DE');
+  const $ = id => document.getElementById(id);
+  let cur = new URLSearchParams(location.search).get('p');
+  if (!P[cur]) cur = 'cartier';
+
+  function show(key, push) {
+    cur = key;
+    const p = P[key];
+    $('vendor').textContent = p.vendor;
+    $('title').textContent = p.title;
+    $('price').textContent = fmt(p.price);
+    $('desc').textContent = p.desc;
+    $('sizeLine').textContent = 'Größe: ' + p.size + ' · Form: ' + p.shape;
+    $('mLens').textContent = p.lens + ' mm'; $('mBridge').textContent = p.bridge + ' mm'; $('mTemple').textContent = p.temple + ' mm';
+    $('mainImg').src = 'shop/img/' + key + '_0.jpg';
+    $('mainImg').alt = p.vendor + ' ' + p.title;
+    const th = $('thumbs'); th.innerHTML = '';
+    for (let i = 0; i < p.imgs; i++) {
+      const b = document.createElement('button'); if (!i) b.className = 'on';
+      b.innerHTML = '<img alt="">'; b.querySelector('img').src = 'shop/img/' + key + '_' + i + '.jpg';
+      b.addEventListener('click', () => { $('mainImg').src = 'shop/img/' + key + '_' + i + '.jpg'; th.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
+      th.appendChild(b);
+    }
+    const cards = $('cards'); cards.innerHTML = '';
+    Object.keys(P).filter(k => k !== key).forEach(k => {
+      const c = document.createElement('button'); c.className = 'card';
+      c.innerHTML = '<span class="ph"><img alt=""><i>Anprobieren</i></span><span class="t"></span><span class="p"></span>';
+      c.querySelector('img').src = 'shop/img/' + k + '_0.jpg';
+      c.querySelector('.t').textContent = P[k].vendor + ' · ' + P[k].title;
+      c.querySelector('.p').textContent = fmt(P[k].price);
+      c.addEventListener('click', () => { show(k, true); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+      cards.appendChild(c);
+    });
+    document.title = p.vendor + ' ' + p.title + ' – Konzept Try-On';
+    if (push) history.replaceState(null, '', '?p=' + key);
+    $('sheetTitle').textContent = 'Virtuelle Anprobe · ' + p.vendor + ' ' + p.title;
+    $('sheetPrice').textContent = fmt(p.price);
+  }
+
+  // ---- try-on modal: the try-on page runs inside, in German, starting on this product
+  const modal = $('modal');
+  let frame = null;
+  function openTry() {
+    modal.classList.add('open'); modal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    frame = document.createElement('iframe');
+    frame.allow = 'camera; fullscreen; screen-wake-lock';
+    frame.title = 'Virtuelle Anprobe';
+    frame.src = 'index.html?embed=1&lang=de&frame=' + cur;
+    $('frameHost').appendChild(frame);
+  }
+  function closeTry() {
+    if (frame) { try { frame.contentWindow.postMessage({ type: 'tryon-stop' }, '*'); } catch (e) {} frame.remove(); frame = null; }
+    modal.classList.remove('open'); modal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+  }
+  // when the customer switches frames inside the try-on, the page follows
+  window.addEventListener('message', e => {
+    if (e.data && e.data.type === 'tryon-frame' && P[e.data.key] && e.data.key !== cur) show(e.data.key, true);
+  });
+  $('btnTry').addEventListener('click', openTry);
+  $('pillTry').addEventListener('click', openTry);
+  $('closeTry').addEventListener('click', closeTry);
+  modal.addEventListener('click', e => { if (e.target === modal) closeTry(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && modal.classList.contains('open')) closeTry(); });
+
+  const toast = $('toast'); let tt;
+  const notReal = () => { toast.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => toast.classList.remove('show'), 2200); };
+  $('btnCart').addEventListener('click', notReal);
+  $('sheetCart').addEventListener('click', notReal);
+
+  show(cur, false);
+  // keep this page and the try-on on the device for use without internet
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>
