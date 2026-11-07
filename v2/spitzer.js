@@ -102,18 +102,18 @@ function lensMesh(contour) {
 function gradientTexture() {
   const c = document.createElement('canvas'); c.width = 4; c.height = 128;
   const x = c.getContext('2d'), g = x.createLinearGradient(0, 0, 0, 128);
-  g.addColorStop(0, '#5d7d74'); g.addColorStop(.6, '#6f9087'); g.addColorStop(1, '#8fada3');
+  g.addColorStop(0, '#2c4a41'); g.addColorStop(.6, '#38584e'); g.addColorStop(1, '#4b6d62');   // deep green, as in the product photos
   x.fillStyle = g; x.fillRect(0, 0, 4, 128);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 
 export function buildSpitzer() {
-  const metal = new THREE.MeshStandardMaterial({ color: 0xd9dadb, metalness: 1, roughness: .2 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0xe4e5e7, metalness: 1, roughness: .16 });
   const brushed = new THREE.MeshStandardMaterial({ color: 0xc8c9cb, metalness: 1, roughness: .38 });
   const gold = new THREE.MeshStandardMaterial({ color: 0xd8b26a, metalness: 1, roughness: .25 });
-  const acetate = new THREE.MeshPhysicalMaterial({ color: 0x6f7985, metalness: 0, roughness: .14, clearcoat: 1, clearcoatRoughness: .08,
-    transparent: true, opacity: .6, side: THREE.DoubleSide });
-  const shield = acetate.clone(); shield.opacity = .24;
+  const acetate = new THREE.MeshPhysicalMaterial({ color: 0x7d8792, metalness: 0, roughness: .12, clearcoat: 1, clearcoatRoughness: .06, envMapIntensity: .45,
+    transparent: true, opacity: .5, side: THREE.DoubleSide });
+  const shield = acetate.clone(); shield.opacity = .28;
   const pad = new THREE.MeshPhysicalMaterial({ color: 0xd8dcdc, roughness: .2, clearcoat: 1, transparent: true, opacity: .55 });
   const tint = new THREE.MeshBasicMaterial({ map: gradientTexture(), blending: THREE.MultiplyBlending, transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
   const gloss = new THREE.MeshStandardMaterial({ color: 0x000000, metalness: 0, roughness: .05, transparent: true, opacity: .9, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });

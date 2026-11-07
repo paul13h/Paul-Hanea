@@ -19,6 +19,21 @@ renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 const scene = new THREE.Scene();
 scene.environment = studioEnv(renderer);
+// Reflections from the real room: the camera image, blurred and wrapped around the glasses, refreshed every second.
+const envC = document.createElement('canvas'); envC.width = 256; envC.height = 128; const envX = envC.getContext('2d');
+const pmrem = new THREE.PMREMGenerator(renderer); let envRT = null;
+function roomEnv(img, w, h) {
+  envX.filter = 'blur(6px)';
+  envX.drawImage(img, 0, 0, w, h * .7, -20, -10, 296, 92);              // room behind the camera, approximated by what it sees
+  envX.drawImage(img, 0, h * .55, w, h * .45, -20, 78, 296, 60);
+  envX.filter = 'none';
+  const g = envX.createLinearGradient(0, 0, 0, 128); g.addColorStop(0, 'rgba(255,255,255,.35)'); g.addColorStop(.35, 'rgba(255,255,255,0)'); g.addColorStop(.75, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.55)');
+  envX.fillStyle = g; envX.fillRect(0, 0, 256, 128);
+  envX.fillStyle = 'rgba(255,255,255,.9)'; envX.fillRect(118, 6, 20, 14);   // a soft ceiling light for metal highlights
+  const t = new THREE.CanvasTexture(envC); t.mapping = THREE.EquirectangularReflectionMapping; t.colorSpace = THREE.SRGBColorSpace;
+  const rt = pmrem.fromEquirectangular(t); t.dispose();
+  if (envRT) envRT.dispose(); envRT = rt; scene.environment = rt.texture;
+}
 const bg = document.createElement('canvas'), bgCtx = bg.getContext('2d', { alpha: false });
 const bgTex = new THREE.CanvasTexture(bg); bgTex.colorSpace = THREE.SRGBColorSpace; scene.background = bgTex;
 const FOV = +QS.get('fov') || 46;                                   // typical laptop or phone front camera, vertical
@@ -218,7 +233,7 @@ function onResults(res) {
   const tr = track(lms, w, h, t0);
   if (scan.on) scanStep(tr, t0);
   if (!scan.on) { setHead(tr); head.visible = found > 4; }   // a face just found again is often misread for a few frames
-  if (++seen % 30 === 1) adaptLight(bgCtx);
+  if (++seen % 30 === 1) { adaptLight(bgCtx); roomEnv(img, w, h); }
   renderer.render(scene, camera);
   window.__tryon.ms = performance.now() - c0; window.__tryon.pose = tr; window.__tryon.rms = tr.raw.rms;
 }
