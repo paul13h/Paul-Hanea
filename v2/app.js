@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import { studioEnv } from './env.js';
 import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js';
 import { buildTomFord, SPEC as SPEC_TF } from './tomford.js';
-import { REF, RIGID } from './face-ref.js';
+import { REF, RIGID as RIGID_ALL } from './face-ref.js';
+// Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
+const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
+const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
 import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js';
 
 const $ = id => document.getElementById(id);
