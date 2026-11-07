@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { studioEnv } from './env.js';
-import { buildSpitzer, SPEC } from './spitzer.js';
+import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js';
+import { buildTomFord, SPEC as SPEC_TF } from './tomford.js';
 import { REF, RIGID } from './face-ref.js';
 import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js';
 
@@ -9,18 +10,22 @@ const stage = $('stage'), canvas = $('view'), videoEl = $('video');
 const startView = $('startView'), scanView = $('scanView'), scanText = $('scanText'), scanBar = $('scanBar'), fitCard = $('fitCard');
 
 // ---------------------------------------------------------------- scene
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+const QS = new URLSearchParams(location.search);
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: QS.has('capture') });
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 const scene = new THREE.Scene();
 scene.environment = studioEnv(renderer);
 const bg = document.createElement('canvas'), bgCtx = bg.getContext('2d', { alpha: false });
 const bgTex = new THREE.CanvasTexture(bg); bgTex.colorSpace = THREE.SRGBColorSpace; scene.background = bgTex;
-const FOV = 46;                                   // typical laptop or phone front camera, vertical
+const FOV = +QS.get('fov') || 46;                                   // typical laptop or phone front camera, vertical
 const camera = new THREE.PerspectiveCamera(FOV, 4 / 3, 20, 3000);
 const cam = { f: 1, cx: 0, cy: 0 };
 const head = new THREE.Group(); head.matrixAutoUpdate = false; scene.add(head);
-const glasses = buildSpitzer(); head.add(glasses.root); head.visible = false;
+const IS_TF = QS.get('frame') === 'tf', SPEC = IS_TF ? SPEC_TF : SPEC_SP;
+const glasses = IS_TF ? buildTomFord() : buildSpitzer(); head.add(glasses.root); head.visible = false;
+if (IS_TF) { document.title = 'Tom Ford FT5902-B – Virtuelle Anprobe'; document.querySelector('header b').textContent = 'Tom Ford FT5902-B'; document.querySelector('aside h2').textContent = 'FT5902-B'; document.querySelector('aside .p').textContent = '54□17-145 · Schwarz'; }
+if (QS.has('ghost')) glasses.root.traverse(o => { if (o.isMesh && o.renderOrder >= 0 && o.renderOrder < 6) { o.material = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: .45, depthWrite: false }); } });
 
 // soft contact shadow that the frame casts on the face
 (function addShadow() {
@@ -31,7 +36,7 @@ const glasses = buildSpitzer(); head.add(glasses.root); head.visible = false;
   x.fillStyle = 'rgba(70,52,44,.2)'; x.fillRect(150, 44, 212, 8);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   const m = new THREE.Mesh(new THREE.PlaneGeometry(146, 73), new THREE.MeshBasicMaterial({ map: t, blending: THREE.MultiplyBlending, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }));
-  m.position.set(0, -2.5, -13); m.renderOrder = -1; glasses.root.add(m);
+  m.position.set(0, -2.5, -13); m.renderOrder = -1; m.visible = !QS.has('ghost'); glasses.root.add(m);
 })();
 
 // model with iris points appended (468-477)
@@ -113,10 +118,11 @@ function renderFitCard() {
 }
 
 // ---------------------------------------------------------------- tracking and smoothing
-let pose = null, W = 0, H = 0, lastT = 0, seen = 0;
+let pose = null, W = 0, H = 0, lastT = 0, seen = 0, found = 0;
 // Quick moves pass straight through; only tiny resting noise is filtered out.
-const rotF = new QuatFilter(1.1, .55), zF = new OneEuro(.8, .012), axF = new OneEuro(2.2, .018), ayF = new OneEuro(2.2, .018);
-const ANCHOR = [168, 6, 133, 362];
+// Tuned on real webcam footage: calm at rest, follows fast turns without trailing behind.
+const rotF = new QuatFilter(2.5, 3), zF = new OneEuro(.8, .012), axF = new OneEuro(3, .5), ayF = new OneEuro(3, .5);
+const ANCHOR = [168, 6];
 const resetFilters = () => { rotF.reset(); zF.reset(); axF.reset(); ayF.reset(); pose = null; };
 
 function resize(w, h) {
@@ -131,12 +137,13 @@ function track(lms, w, h, tMs) {
   const pts = lms.map(l => [l.x * w, l.y * h]);
   if (!pose) pose = solvePose(model, RIGID, pts, cam, initialPose(model, pts, cam), 18);
   else pose = solvePose(model, RIGID, pts, cam, pose, 3);
+  if (pose.rms > 25) pose = solvePose(model, RIGID, pts, cam, initialPose(model, pts, cam), 18);   // lost: start again
   const dt = Math.max(.008, Math.min(.1, (tMs - lastT) / 1000)); lastT = tMs;
   const Rs = rotF.filter(pose.R, dt), z = zF.filter(pose.t[2], dt);
   // Anchor: tied to the nose bridge and inner eye corners, so the frame cannot slide on the face
   let ax = 0, ay = 0, am = [0, 0, 0];
   for (const i of ANCHOR) { ax += pts[i][0]; ay += pts[i][1]; am = v.add(am, model[i]); }
-  ax = axF.filter(ax / 4, dt); ay = ayF.filter(ay / 4, dt); am = v.mul(am, 1 / 4);
+  const n = ANCHOR.length; ax = axF.filter(ax / n, dt); ay = ayF.filter(ay / n, dt); am = v.mul(am, 1 / n);
   const r = q.rot(Rs, am), Z = r[2] + z;
   const X = (ax - cam.cx) * -Z / cam.f, Y = (ay - cam.cy) * Z / cam.f;
   const t = [X - r[0], Y - r[1], z];
@@ -199,10 +206,11 @@ function onResults(res) {
   const img = res.image, w = img.videoWidth || img.width, h = img.videoHeight || img.height, t0 = res.t ?? performance.now(), c0 = performance.now();
   resize(w, h); bgCtx.drawImage(img, 0, 0, w, h); bgTex.needsUpdate = true;
   const lms = res.multiFaceLandmarks && res.multiFaceLandmarks[0];
-  if (!lms) { head.visible = false; resetFilters(); renderer.render(scene, camera); return; }
+  if (!lms) { head.visible = false; resetFilters(); found = 0; renderer.render(scene, camera); return; }
+  found++;
   const tr = track(lms, w, h, t0);
   if (scan.on) scanStep(tr, t0);
-  if (!scan.on) setHead(tr);
+  if (!scan.on) { setHead(tr); head.visible = found > 4; }   // a face just found again is often misread for a few frames
   if (++seen % 30 === 1) adaptLight(bgCtx);
   renderer.render(scene, camera);
   window.__tryon.ms = performance.now() - c0; window.__tryon.pose = tr; window.__tryon.rms = tr.raw.rms;
