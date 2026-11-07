@@ -126,6 +126,7 @@ let pose = null, W = 0, H = 0, lastT = 0, seen = 0, found = 0;
 // Tuned on real webcam footage: calm at rest, follows fast turns without trailing behind.
 const rotF = new QuatFilter(2.5, 3), zF = new OneEuro(.8, .012), axF = new OneEuro(3, .5), ayF = new OneEuro(3, .5);
 const ANCHOR = [168, 6];
+const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
 const resetFilters = () => { rotF.reset(); zF.reset(); axF.reset(); ayF.reset(); pose = null; };
 
 function resize(w, h) {
@@ -142,7 +143,10 @@ function track(lms, w, h, tMs) {
   else pose = solvePose(model, RIGID, pts, cam, pose, 3);
   if (pose.rms > 25) pose = solvePose(model, RIGID, pts, cam, initialPose(model, pts, cam), 18);   // lost: start again
   const dt = Math.max(.008, Math.min(.1, (tMs - lastT) / 1000)); lastT = tMs;
-  const Rs = rotF.filter(pose.R, dt), z = zF.filter(pose.t[2], dt);
+  let Rs = rotF.filter(pose.R, dt); const z = zF.filter(pose.t[2], dt);
+  // Face tracking under-reads strong turns (the far side of the face is hidden), so add back part of the missing turn.
+  const yw = yawOf(Rs), over = Math.abs(yw) - YAW_KNEE;
+  if (over > 0) Rs = q.norm(q.mul(Rs, q.fromVec([0, Math.sign(yw) * YAW_GAIN * over / 57.3, 0])));
   // Anchor: tied to the nose bridge and inner eye corners, so the frame cannot slide on the face
   let ax = 0, ay = 0, am = [0, 0, 0];
   for (const i of ANCHOR) { ax += pts[i][0]; ay += pts[i][1]; am = v.add(am, model[i]); }
