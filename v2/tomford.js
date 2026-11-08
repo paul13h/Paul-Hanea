@@ -1,7 +1,7 @@
 // Tom Ford FT5902-B, black acetate, 54□17-145. Built from Paul's own frame (photos + webcam video).
 // Units: mm. x right, y up, z towards the viewer. Origin: frame centre at lens-centre height.
 import * as THREE from 'three';
-import { TF_OUTER, TF_LENS_L, TF_LENS_R } from './tomford-data.js?v=9';
+import { TF_OUTER, TF_LENS_L, TF_LENS_R } from './tomford-data.js?v=10';
 
 export const SPEC = {
   name: 'Tom Ford FT5902-B', lens: 54, bridge: 17, temple: 145, price: '€ 330',
@@ -13,6 +13,19 @@ export const SPEC = {
 };
 const wrapZ = x => -x * x / (2 * SPEC.wrapR);
 const bend = g => { const p = g.attributes.position; for (let i = 0; i < p.count; i++) p.setZ(i, p.getZ(i) + wrapZ(p.getX(i))); p.needsUpdate = true; g.computeVertexNormals(); return g; };
+// Smooth shading for the acetate: average the normals of faces that meet at a shallow angle, keep real edges crisp.
+function smooth(g, creaseDeg = 38) {
+  g.computeVertexNormals();
+  const p = g.attributes.position, n = g.attributes.normal, key = i => `${p.getX(i).toFixed(3)},${p.getY(i).toFixed(3)},${p.getZ(i).toFixed(3)}`;
+  const groups = new Map(); for (let i = 0; i < p.count; i++) { const k = key(i); (groups.get(k) || groups.set(k, []).get(k)).push(i); }
+  const cos = Math.cos(creaseDeg * Math.PI / 180), out = new Float32Array(n.count * 3);
+  for (const ids of groups.values()) for (const i of ids) {
+    let x = 0, y = 0, z = 0; const nx = n.getX(i), ny = n.getY(i), nz = n.getZ(i);
+    for (const j of ids) { const mx = n.getX(j), my = n.getY(j), mz = n.getZ(j); if (nx * mx + ny * my + nz * mz >= cos) { x += mx; y += my; z += mz; } }
+    const l = Math.hypot(x, y, z) || 1; out[i * 3] = x / l; out[i * 3 + 1] = y / l; out[i * 3 + 2] = z / l;
+  }
+  g.setAttribute('normal', new THREE.BufferAttribute(out, 3)); return g;
+}
 const v2 = a => a.map(p => new THREE.Vector2(p[0], p[1]));
 
 function lensGeo(c) {
@@ -51,7 +64,7 @@ export function buildTomFord() {
   for (const c of [TF_LENS_L, TF_LENS_R]) shape.holes.push(new THREE.Path(v2(c)));
   const fg = new THREE.ExtrudeGeometry(shape, { depth: 4.0, bevelEnabled: true, bevelThickness: 1.0, bevelSize: .9, bevelSegments: 5, curveSegments: 6, steps: 1 });
   fg.translate(0, 0, -4.6);
-  const fm = new THREE.Mesh(bend(fg), acetate); fm.renderOrder = 2; front.add(fm);
+  const fm = new THREE.Mesh(smooth(bend(fg)), acetate); fm.renderOrder = 2; front.add(fm);
   for (const c of [TF_LENS_L, TF_LENS_R]) { const m = new THREE.Mesh(lensGeo(c), lensMat); m.renderOrder = 6; front.add(m); }
 
   // gold "T" on both front corners

@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { studioEnv } from './env.js?v=9';
-import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=9';
-import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=9';
-import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=9';
+import { studioEnv } from './env.js?v=10';
+import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=10';
+import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=10';
+import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=10';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
-import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=9';
+import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=10';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), canvas = $('view'), videoEl = $('video');
@@ -73,7 +73,7 @@ const occMat = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.Doub
 const faceGeo = new THREE.BufferGeometry();
 faceGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(468 * 3), 3));
 const faceOcc = new THREE.Mesh(faceGeo, occMat); faceOcc.renderOrder = -2; faceOcc.frustumCulled = false; head.add(faceOcc);
-const skull = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 24), occMat); skull.renderOrder = -2; head.add(skull);
+const skull = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 24), occMat); skull.renderOrder = -2; skull.visible = false; head.add(skull);
 
 function buildTris() {
   if (typeof FACEMESH_TESSELATION === 'undefined') return;
@@ -90,10 +90,13 @@ function setOccluders() {
   for (let i = 0; i < 468; i++) { const m = model[i];
     // the nose keeps its full size (plus 1 mm), so it can hide the far lens when the head turns
     const nose = Math.abs(m[0] - model[168][0]) < 13 && m[1] < eyeY + 4 && m[1] > tipY - 4;
-    const k = nose ? 1 : .985; p.setXYZ(i, c[0] + (m[0] - c[0]) * k, c[1] + (m[1] - c[1]) * k, c[2] + (m[2] - c[2]) * k + (nose ? 1 : 0)); }
+    const ax = Math.abs(m[0] - model[168][0]), side = ax > 44 && m[1] > model[1][1];   // near the temples the arms run over the face surface
+    const k = nose ? 1 : side ? .985 - Math.min(.11, (ax - 44) * .006) : .985; p.setXYZ(i, c[0] + (m[0] - c[0]) * k, c[1] + (m[1] - c[1]) * k, c[2] + (m[2] - c[2]) * k + (nose ? 1 : 0)); }
   p.needsUpdate = true; faceGeo.computeBoundingSphere();
   const ex = (Math.abs(model[234][0]) + Math.abs(model[454][0])) / 2;
-  skull.scale.set(ex - 1, 98, 96); skull.position.set((model[234][0] + model[454][0]) / 2, 8, model[234][2] - 22);
+  // the back of the head hides the far arm; it stays narrower than the sides of the face so the near arm, which runs
+  // just outside the head, is never hidden
+  skull.scale.set(ex - 7, 96, 92); skull.position.set((model[234][0] + model[454][0]) / 2, 8, model[234][2] - 30);
 }
 
 // ---------------------------------------------------------------- fit engine
@@ -109,7 +112,9 @@ function computeFit() {
   let seatZ = seat.z;
   const backZ = seatZ - SPEC.padZ - 3.4;                 // back of the lens at the eye
   if (backZ < eyeZ + 10) seatZ += eyeZ + 10 - backZ;     // lenses never touch the lashes
-  const earR = [Math.abs(model[356][0] - midX) + 1.5, (model[356][1] + model[127][1]) / 2 + 7, (model[356][2] + model[127][2]) / 2 - 7];
+  // the arm passes just outside the widest part of the face next to the eyes and reaches the ear
+  const sideX = Math.max(...[234, 454, 127, 356, 162, 389].map(k => Math.abs(model[k][0] - midX)));
+  const earR = [sideX + 2.5, (model[356][1] + model[127][1]) / 2 + 1, (model[356][2] + model[127][2]) / 2 - 7];
   const hy = seat.y - SPEC.padY + SPEC.hingeY, hz = seatZ - SPEC.padZ + SPEC.hingeZ;
   let tilt = Math.atan2(earR[1] - hy, hz - earR[2]) + 2 * Math.PI / 180;
   tilt = Math.max(5, Math.min(12, tilt * 57.3)) / 57.3;
@@ -124,7 +129,7 @@ function applyFit() {
   const r = glasses.root; r.rotation.set(fit.tilt, 0, 0);
   const pad = new THREE.Vector3(0, SPEC.padY, SPEC.padZ).applyEuler(r.rotation);
   r.position.set(fit.midX - pad.x, fit.seat.y + nudge - pad.y, fit.seatZ - pad.z);
-  const a = Math.max(-.16, Math.min(.16, fit.open));
+  const a = Math.max(-.05, Math.min(.2, fit.open));
   glasses.temples.L.rotation.y = -a; glasses.temples.R.rotation.y = a;
 }
 
@@ -180,6 +185,8 @@ function track(lms, w, h, tMs) {
 const qObj = new THREE.Quaternion(), pObj = new THREE.Vector3(), sObj = new THREE.Vector3(1, 1, 1);
 function setHead(p) {
   qObj.set(...p.R); pObj.set(...p.t); head.matrix.compose(pObj, qObj, sObj); head.matrixWorldNeedsUpdate = true; head.visible = true;
+  // the arm on the side turned away from the camera is behind the head; the near arm stays fully visible up to the ear
+  for (const [name, s] of [['L', -1], ['R', 1]]) { const away = q.rot(p.R, [s, 0, 0])[2]; glasses.temples[name].visible = away > -.26; }
 }
 
 // ---------------------------------------------------------------- face scan
