@@ -15,7 +15,7 @@ const startView = $('startView'), scanView = $('scanView'), scanText = $('scanTe
 // ---------------------------------------------------------------- scene
 const QS = new URLSearchParams(location.search);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: QS.has('capture') });
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setPixelRatio(1);   // draw the frame at the camera's own resolution, so it is exactly as sharp as the video
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 const scene = new THREE.Scene();
 scene.environment = studioEnv(renderer);
@@ -49,9 +49,9 @@ if (QS.has('ghost')) glasses.root.traverse(o => { if (o.isMesh && o.renderOrder 
 (function addShadow() {
   const c = document.createElement('canvas'); c.width = 512; c.height = 256;
   const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 512, 256);
-  x.filter = 'blur(13px)'; x.strokeStyle = 'rgba(70,52,44,.34)'; x.lineWidth = 15;
+  x.filter = 'blur(12px)'; x.strokeStyle = 'rgba(60,44,36,.48)'; x.lineWidth = 17;
   for (const s of [-1, 1]) { x.beginPath(); x.ellipse(256 + s * 106, 120, 84, 66, 0, 0, Math.PI * 2); x.stroke(); }
-  x.fillStyle = 'rgba(70,52,44,.2)'; x.fillRect(150, 44, 212, 8);
+  x.fillStyle = 'rgba(60,44,36,.3)'; x.fillRect(150, 44, 212, 9);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   const m = new THREE.Mesh(new THREE.PlaneGeometry(146, 73), new THREE.MeshBasicMaterial({ map: t, blending: THREE.MultiplyBlending, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }));
   m.position.set(0, -2.5, -13); m.renderOrder = -1; m.visible = !QS.has('ghost'); glasses.root.add(m);
@@ -85,7 +85,11 @@ function buildTris() {
 
 function setOccluders() {
   const p = faceGeo.attributes.position, c = [0, -8, -72];
-  for (let i = 0; i < 468; i++) { const m = model[i]; p.setXYZ(i, c[0] + (m[0] - c[0]) * .985, c[1] + (m[1] - c[1]) * .985, c[2] + (m[2] - c[2]) * .985); }
+  const eyeY = (model[133][1] + model[362][1]) / 2, tipY = model[1][1];
+  for (let i = 0; i < 468; i++) { const m = model[i];
+    // the nose keeps its full size (plus 1 mm), so it can hide the far lens when the head turns
+    const nose = Math.abs(m[0] - model[168][0]) < 13 && m[1] < eyeY + 4 && m[1] > tipY - 4;
+    const k = nose ? 1 : .985; p.setXYZ(i, c[0] + (m[0] - c[0]) * k, c[1] + (m[1] - c[1]) * k, c[2] + (m[2] - c[2]) * k + (nose ? 1 : 0)); }
   p.needsUpdate = true; faceGeo.computeBoundingSphere();
   const ex = (Math.abs(model[234][0]) + Math.abs(model[454][0])) / 2;
   skull.scale.set(ex - 1, 98, 96); skull.position.set((model[234][0] + model[454][0]) / 2, 8, model[234][2] - 22);
