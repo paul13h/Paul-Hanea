@@ -1,7 +1,7 @@
 // Akoni Spitzer, built as true 3D geometry from its product photos and published sizes.
 // Units: mm. x right, y up, z towards the viewer. Origin: frame centre, at lens-centre height.
 import * as THREE from 'three';
-import { LENS } from './spitzer-data.js?v=6';
+import { LENS } from './spitzer-data.js?v=7';
 
 export const SPEC = {
   name: 'Akoni Spitzer', lens: 54, bridge: 18, temple: 142, price: '€ 880',
@@ -102,7 +102,7 @@ function lensMesh(contour) {
 function gradientTexture() {
   const c = document.createElement('canvas'); c.width = 4; c.height = 128;
   const x = c.getContext('2d'), g = x.createLinearGradient(0, 0, 0, 128);
-  g.addColorStop(0, '#2c4a41'); g.addColorStop(.6, '#38584e'); g.addColorStop(1, '#4b6d62');   // deep green, as in the product photos
+  g.addColorStop(0, '#16302a'); g.addColorStop(.6, '#1f3d35'); g.addColorStop(1, '#2d5047');   // deep green, as in the product photos
   x.fillStyle = g; x.fillRect(0, 0, 4, 128);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }

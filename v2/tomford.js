@@ -1,7 +1,7 @@
 // Tom Ford FT5902-B, black acetate, 54□17-145. Built from Paul's own frame (photos + webcam video).
 // Units: mm. x right, y up, z towards the viewer. Origin: frame centre at lens-centre height.
 import * as THREE from 'three';
-import { TF_OUTER, TF_LENS_L, TF_LENS_R } from './tomford-data.js?v=6';
+import { TF_OUTER, TF_LENS_L, TF_LENS_R } from './tomford-data.js?v=7';
 
 export const SPEC = {
   name: 'Tom Ford FT5902-B', lens: 54, bridge: 17, temple: 145, price: '€ 330',
