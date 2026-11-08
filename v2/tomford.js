@@ -1,14 +1,14 @@
 // Tom Ford FT5902-B, black acetate, 54□17-145. Built from Paul's own frame (photos + webcam video).
 // Units: mm. x right, y up, z towards the viewer. Origin: frame centre at lens-centre height.
 import * as THREE from 'three';
-import { TF_OUTER, TF_LENS_L, TF_LENS_R } from './tomford-data.js?v=8';
+import { TF_OUTER, TF_LENS_L, TF_LENS_R } from './tomford-data.js?v=9';
 
 export const SPEC = {
   name: 'Tom Ford FT5902-B', lens: 54, bridge: 17, temple: 145, price: '€ 330',
-  padHalfX: 8.8,      // where the acetate bridge touches the sides of the nose
-  padY: -10.5,        // calibrated: the real frame rides this much higher than the first estimate
-  padZ: -5.8,
-  hingeX: 66.2, hingeY: 13, hingeZ: -6.5,
+  padHalfX: 8.2,      // where the high acetate bridge touches the sides of the nose
+  padY: -4.5,         // checked against Paul's real frame in his webcam video (red overlay test)
+  padZ: -6.2,
+  hingeX: 67.5, hingeY: 14.8, hingeZ: -6.8,
   wrapR: 320
 };
 const wrapZ = x => -x * x / (2 * SPEC.wrapR);
@@ -24,32 +24,32 @@ function lensGeo(c) {
 
 function temple(side, acetate, metal) {
   // a tapered acetate arm, straight to the ear, then bending down behind it
-  const pts = [[0, 0, 0], [0, .3, -40], [0, 0, -95], [0, -2.5, -112], [0, -12, -128], [0, -24, -138]].map(a => new THREE.Vector3(...a));
+  const pts = [[0, 0, 0], [0, -.6, -55], [0, -1.5, -100], [0, -6, -112], [0, -15, -124], [0, -26, -132]].map(a => new THREE.Vector3(...a));   // straight, then bending down behind the ear (product side photo)
   const curve = new THREE.CatmullRomCurve3(pts), N = 60, prof = [], pos = [], idx = [];
   for (let i = 0; i < 16; i++) { const t = i / 16 * Math.PI * 2, c = Math.cos(t), s = Math.sin(t); prof.push([Math.sign(c) * Math.abs(c) ** .35, Math.sign(s) * Math.abs(s) ** .35]); }
   for (let i = 0; i <= N; i++) {
     const u = i / N, p = curve.getPoint(u), tg = curve.getTangent(u).normalize();
     const sideV = new THREE.Vector3(1, 0, 0), up = new THREE.Vector3().crossVectors(tg, sideV).normalize().negate();
-    const h = 6.2 - 2.4 * Math.min(1, u * 1.6), w = 3.4 - 1.0 * u;
+    const h = 7.4 - 1.6 * u, w = 4.2 - 1.2 * u;   // a thick acetate arm, about 7 mm tall at the hinge
     for (const [a, b] of prof) { const q = p.clone().addScaledVector(sideV, a * w / 2).addScaledVector(up, b * h / 2); pos.push(q.x, q.y, q.z); }
   }
   for (let i = 0; i < N; i++) for (let j = 0; j < 16; j++) { const a = i * 16 + j, b = i * 16 + (j + 1) % 16; idx.push(a, a + 16, b, b, a + 16, b + 16); }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
   const grp = new THREE.Group(), arm = new THREE.Mesh(g, acetate); arm.renderOrder = 3; grp.add(arm);
-  const strip = new THREE.Mesh(new THREE.BoxGeometry(.5, 1.1, 24), metal); strip.position.set(side * 1.75, .6, -15); grp.add(strip);   // the thin metal bar on the outside
+  const strip = new THREE.Mesh(new THREE.BoxGeometry(.6, 1.2, 30), metal); strip.position.set(side * 2.15, 1.2, -16); grp.add(strip);   // the long silver T bar on the outside of the arm
   return grp;
 }
 
 export function buildTomFord() {
   const acetate = new THREE.MeshPhysicalMaterial({ color: 0x0b0b0c, roughness: .3, metalness: 0, clearcoat: 1, clearcoatRoughness: .06, envMapIntensity: .45 });
-  const metal = new THREE.MeshStandardMaterial({ color: 0xcfd0d2, metalness: 1, roughness: .22 });
-  const gold = new THREE.MeshStandardMaterial({ color: 0xd9b46c, metalness: 1, roughness: .2 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0xdfe0e2, metalness: 1, roughness: .18 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xd9b46c, metalness: 1, roughness: .2 });   // kept for other colourways; this one has silver T's
   const lensMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: .04, metalness: 0, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: .18 });
   const root = new THREE.Group(), front = new THREE.Group(); root.add(front);
 
   const shape = new THREE.Shape(v2(TF_OUTER));
   for (const c of [TF_LENS_L, TF_LENS_R]) shape.holes.push(new THREE.Path(v2(c)));
-  const fg = new THREE.ExtrudeGeometry(shape, { depth: 4.2, bevelEnabled: true, bevelThickness: .9, bevelSize: .8, bevelSegments: 4, curveSegments: 6, steps: 1 });
+  const fg = new THREE.ExtrudeGeometry(shape, { depth: 4.0, bevelEnabled: true, bevelThickness: 1.0, bevelSize: .9, bevelSegments: 5, curveSegments: 6, steps: 1 });
   fg.translate(0, 0, -4.6);
   const fm = new THREE.Mesh(bend(fg), acetate); fm.renderOrder = 2; front.add(fm);
   for (const c of [TF_LENS_L, TF_LENS_R]) { const m = new THREE.Mesh(lensGeo(c), lensMat); m.renderOrder = 6; front.add(m); }
@@ -57,9 +57,9 @@ export function buildTomFord() {
   // gold "T" on both front corners
   for (const s of [-1, 1]) {
     // like the real frame: the T lies on its side, crossbar along the outer edge, stem pointing to the lens
-    const t = new THREE.Group(), x = s * 64.6;
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(4.6, .75, .45), gold), stem = new THREE.Mesh(new THREE.BoxGeometry(.75, 3.8, .45), gold);
-    bar.position.y = 1.9; t.add(bar, stem); t.rotation.z = -s * Math.PI / 2; t.position.set(x + -s * 0, 15.2, wrapZ(x) + .75); front.add(t);
+    const t = new THREE.Group(), x = s * 67.6;
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(4.6, .9, .5), metal), stem = new THREE.Mesh(new THREE.BoxGeometry(.9, 4.4, .5), metal);
+    bar.position.y = 2.2; t.add(bar, stem); t.rotation.z = -s * Math.PI / 2; t.position.set(x, 15.2, wrapZ(x) + .8); front.add(t);
   }
   const temples = {};
   for (const [n, s] of [['L', -1], ['R', 1]]) {
