@@ -1,7 +1,7 @@
 // Tom Ford FT5902-B, black acetate, 54□17-145. Built from Paul's own frame (photos + webcam video).
 // Units: mm. x right, y up, z towards the viewer. Origin: frame centre at lens-centre height.
 import * as THREE from 'three';
-import { TF_OUTER, TF_LENS_L, TF_LENS_R } from './tomford-data.js?v=10';
+import { TF_OUTER, TF_LENS_L, TF_LENS_R } from './tomford-data.js?v=11';
 
 export const SPEC = {
   name: 'Tom Ford FT5902-B', lens: 54, bridge: 17, temple: 145, price: '€ 330',
@@ -49,35 +49,44 @@ function temple(side, acetate, metal) {
   for (let i = 0; i < N; i++) for (let j = 0; j < 16; j++) { const a = i * 16 + j, b = i * 16 + (j + 1) % 16; idx.push(a, a + 16, b, b, a + 16, b + 16); }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
   const grp = new THREE.Group(), arm = new THREE.Mesh(g, acetate); arm.renderOrder = 3; grp.add(arm);
-  const strip = new THREE.Mesh(new THREE.BoxGeometry(.6, 1.2, 30), metal); strip.position.set(side * 2.15, 1.2, -16); grp.add(strip);   // the long silver T bar on the outside of the arm
+  const strip = new THREE.Mesh(new THREE.BoxGeometry(.6, 1.2, 26), metal); strip.position.set(side * 2.15, 1.2, -18); grp.add(strip);   // the long silver T on the outside of the arm:
+  const cross = new THREE.Mesh(new THREE.BoxGeometry(.6, 4.6, 1.2), metal); cross.position.set(side * 2.15, 1.2, -4.6); grp.add(cross);    // stem along the arm, short crossbar near the hinge
   return grp;
 }
 
 export function buildTomFord() {
-  const acetate = new THREE.MeshPhysicalMaterial({ color: 0x0b0b0c, roughness: .3, metalness: 0, clearcoat: 1, clearcoatRoughness: .06, envMapIntensity: .45 });
-  const metal = new THREE.MeshStandardMaterial({ color: 0xdfe0e2, metalness: 1, roughness: .18 });
+  const acetate = new THREE.MeshPhysicalMaterial({ color: 0x0a0a0b, roughness: .22, metalness: 0, clearcoat: 1, clearcoatRoughness: .025, envMapIntensity: .85 });   // glossy black, like the real frame
+  const metal = new THREE.MeshStandardMaterial({ color: 0xeceef0, metalness: 1, roughness: .12, envMapIntensity: 1.3 });
   const gold = new THREE.MeshStandardMaterial({ color: 0xd9b46c, metalness: 1, roughness: .2 });   // kept for other colourways; this one has silver T's
   const lensMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: .04, metalness: 0, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: .18 });
+  // the arms are mostly seen through the lenses or against the skin: less mirror-like, so they stay black like the real ones
+  const armAcetate = acetate.clone(); armAcetate.envMapIntensity = .25; armAcetate.clearcoat = .5;
+  const armMetal = metal.clone(); armMetal.envMapIntensity = .8;
+  // through a lens you see your own temple, never the arm (it runs behind the head's side):
+  // the lens shapes mark the stencil, and the arms are not drawn where it is marked
+  for (const m of [armAcetate, armMetal]) Object.assign(m, { stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp });
+  const maskMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false, side: THREE.DoubleSide, stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp });
   const root = new THREE.Group(), front = new THREE.Group(); root.add(front);
 
   const shape = new THREE.Shape(v2(TF_OUTER));
   for (const c of [TF_LENS_L, TF_LENS_R]) shape.holes.push(new THREE.Path(v2(c)));
-  const fg = new THREE.ExtrudeGeometry(shape, { depth: 4.0, bevelEnabled: true, bevelThickness: 1.0, bevelSize: .9, bevelSegments: 5, curveSegments: 6, steps: 1 });
+  // bevelOffset keeps the rounded edge inside the traced outline, so the rims stay as slim as on the real frame
+  const fg = new THREE.ExtrudeGeometry(shape, { depth: 4.0, bevelEnabled: true, bevelThickness: 1.0, bevelSize: .9, bevelOffset: -.9, bevelSegments: 5, curveSegments: 6, steps: 1 });
   fg.translate(0, 0, -4.6);
   const fm = new THREE.Mesh(smooth(bend(fg)), acetate); fm.renderOrder = 2; front.add(fm);
-  for (const c of [TF_LENS_L, TF_LENS_R]) { const m = new THREE.Mesh(lensGeo(c), lensMat); m.renderOrder = 6; front.add(m); }
+  for (const c of [TF_LENS_L, TF_LENS_R]) { const m = new THREE.Mesh(lensGeo(c), lensMat); m.renderOrder = 6; front.add(m); const k = new THREE.Mesh(m.geometry, maskMat); k.renderOrder = 1; front.add(k); }
 
   // gold "T" on both front corners
   for (const s of [-1, 1]) {
     // like the real frame: the T lies on its side, crossbar along the outer edge, stem pointing to the lens
     const t = new THREE.Group(), x = s * 67.6;
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(4.6, .9, .5), metal), stem = new THREE.Mesh(new THREE.BoxGeometry(.9, 4.4, .5), metal);
-    bar.position.y = 2.2; t.add(bar, stem); t.rotation.z = -s * Math.PI / 2; t.position.set(x, 15.2, wrapZ(x) + .8); front.add(t);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(5.2, 1.0, .6), metal), stem = new THREE.Mesh(new THREE.BoxGeometry(1.0, 4.9, .6), metal);
+    bar.position.y = 2.45; t.add(bar, stem); t.rotation.z = -s * Math.PI / 2; t.position.set(x, 15.2, wrapZ(x) + .8); front.add(t);
   }
   const temples = {};
   for (const [n, s] of [['L', -1], ['R', 1]]) {
     const pivot = new THREE.Group(); pivot.position.set(s * SPEC.hingeX, SPEC.hingeY, SPEC.hingeZ + wrapZ(SPEC.hingeX) * 0); root.add(pivot);
-    pivot.add(temple(s, acetate, metal)); temples[n] = pivot;
+    pivot.add(temple(s, armAcetate, armMetal)); temples[n] = pivot;
   }
   return { root, front, temples, lenses: [TF_LENS_L, TF_LENS_R], materials: { acetate, metal, gold, lensMat } };
 }
