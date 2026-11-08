@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { studioEnv } from './env.js?v=12';
-import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=12';
-import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=12';
-import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=12';
+import { studioEnv } from './env.js?v=13';
+import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=13';
+import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=13';
+import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=13';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
-import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=12';
+import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=13';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), canvas = $('view'), videoEl = $('video');
@@ -126,7 +126,7 @@ function computeFit() {
     (model[356][2] + model[127][2]) / 2 - 7];
   const hy = seat.y - SPEC.padY + SPEC.hingeY, hz = seatZ - SPEC.padZ + SPEC.hingeZ;
   let tilt = Math.atan2(earR[1] - hy, hz - earR[2]) + 2 * Math.PI / 180;
-  tilt = Math.max(5, Math.min(12, tilt * 57.3)) / 57.3;
+  tilt = (Math.max(5, Math.min(12, tilt * 57.3)) + TILT_X) / 57.3;
   const open = Math.atan2(earR[0] - SPEC.hingeX, hz - earR[2]);
   // the arms are not glued to the front: they angle down from the hinge to the ear, whatever the tilt of the front
   const armDown = Math.max(0, Math.min(14 / 57.3, Math.atan2(hy - earR[1], hz - earR[2])));
@@ -135,11 +135,13 @@ function computeFit() {
   return { midX, seat, seatZ, tilt, open, armDown, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact };
 }
 
+const basePos = new THREE.Vector3();
 function applyFit() {
   if (!fit) return;
   const r = glasses.root; r.rotation.set(fit.tilt, 0, 0);
   const pad = new THREE.Vector3(0, SPEC.padY, SPEC.padZ).applyEuler(r.rotation);
   r.position.set(fit.midX - pad.x, fit.seat.y + nudge - pad.y, fit.seatZ - pad.z);
+  basePos.copy(r.position);
   const a = Math.max(-.05, Math.min(.2, fit.open));
   glasses.temples.L.rotation.set(-(fit.armDown + fit.tilt), -a, 0); glasses.temples.R.rotation.set(-(fit.armDown + fit.tilt), a, 0);
 }
@@ -162,6 +164,10 @@ let pose = null, W = 0, H = 0, lastT = 0, seen = 0, found = 0;
 // Tuned on real webcam footage: calm at rest, follows fast turns without trailing behind.
 const rotF = new QuatFilter(2.5, 3), zF = new OneEuro(.8, .012), axF = new OneEuro(3, .5), ayF = new OneEuro(3, .5);
 const ANCHOR = [168, 6];
+// Both checked frame by frame against Paul's real Tom Ford (ghost=1 over his video, looking up, down and to the sides):
+// TILT_X: the real front leans forward more than the fitted tilt (seen from below it looks taller, from above flatter).
+// PARALLAX: in turned views the real front sits further towards the nose than the tracked bridge point suggests.
+const PARALLAX = +(QS.get('px') ?? 9), TILT_X = +(QS.get('tx') ?? 12);
 const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
 const resetFilters = () => { rotF.reset(); zF.reset(); axF.reset(); ayF.reset(); pose = null; };
 
@@ -196,6 +202,13 @@ function track(lms, w, h, tMs) {
 const qObj = new THREE.Quaternion(), pObj = new THREE.Vector3(), sObj = new THREE.Vector3(1, 1, 1);
 function setHead(p) {
   qObj.set(...p.R); pObj.set(...p.t); head.matrix.compose(pObj, qObj, sObj); head.matrixWorldNeedsUpdate = true; head.visible = true;
+  // Parallax: when the head turns, the real frame shifts sideways against the tracked nose bridge as if it sat PARALLAX mm
+  // further in front of it. Shift it sideways by that amount (not closer, which would enlarge it; up/down is handled by TILT_X).
+  if (PARALLAX) {
+    const c = v.mul(p.t, -1 / v.len(p.t)), ch = q.rot(q.conj(p.R), c), fc = ch[2];
+    // sideways part of (head forward minus its part along the line of sight), in head coordinates
+    glasses.root.position.set(basePos.x - PARALLAX * ch[0] * fc, basePos.y, basePos.z);
+  } else glasses.root.position.copy(basePos);
   // the arm on the side turned away from the camera is behind the head; the near arm stays fully visible up to the ear
   for (const [name, s] of [['L', -1], ['R', 1]]) { const away = q.rot(p.R, [s, 0, 0])[2]; glasses.temples[name].visible = away > -.26; }
 }
@@ -297,4 +310,4 @@ $('upBtn').addEventListener('click', () => { nudge = Math.min(5, nudge + .5); ap
 $('downBtn').addEventListener('click', () => { nudge = Math.max(-5, nudge - .5); applyFit(); renderFitCard(); });
 
 buildTris(); setOccluders(); fit = computeFit(); applyFit();
-window.__tryon = { onResults, scan, beginScan, finishScan, get model() { return model; }, get fit() { return fit; }, cam, yawOf, render: () => renderer.render(scene, camera), resize, stats: () => ({ scanned }) };
+window.__tryon = { onResults, scan, glasses, camera, head, THREE, beginScan, finishScan, get model() { return model; }, get fit() { return fit; }, cam, yawOf, render: () => renderer.render(scene, camera), resize, stats: () => ({ scanned }) };
