@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { studioEnv } from './env.js?v=11';
-import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=11';
-import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=11';
-import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=11';
+import { studioEnv } from './env.js?v=12';
+import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=12';
+import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=12';
+import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=12';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
-import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=11';
+import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=12';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), canvas = $('view'), videoEl = $('video');
@@ -55,7 +55,9 @@ if (QS.has('ghost')) glasses.root.traverse(o => { if (o.isMesh && o.material.col
   x.filter = 'blur(7px)'; x.strokeStyle = 'rgba(60,44,36,.42)'; x.lineWidth = 3.4 * k; x.lineJoin = 'round';
   for (const c of glasses.lenses) { x.beginPath(); c.forEach((p, i) => { const [u, v] = px(p, 2.2); i ? x.lineTo(u, v) : x.moveTo(u, v); }); x.closePath(); x.stroke(); }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(146, 73), new THREE.MeshBasicMaterial({ map: t, blending: THREE.MultiplyBlending, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(146, 73), new THREE.MeshBasicMaterial({ map: t, blending: THREE.MultiplyBlending, transparent: true, depthTest: false, depthWrite: false, toneMapped: false,
+    // never inside the lens openings: with the head tilted the shadow would show there as a second, shifted rim
+    stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilZPass: THREE.KeepStencilOp }));
   m.position.set(0, -2.5, -13); m.renderOrder = -1; m.visible = !QS.has('ghost'); glasses.root.add(m);
 })();
 
@@ -90,9 +92,14 @@ function setOccluders() {
   const eyeY = (model[133][1] + model[362][1]) / 2, tipY = model[1][1];
   for (let i = 0; i < 468; i++) { const m = model[i];
     // the nose keeps its full size (plus 1 mm), so it can hide the far lens when the head turns
-    const nose = Math.abs(m[0] - model[168][0]) < 13 && m[1] < eyeY + 4 && m[1] > tipY - 4;
-    const ax = Math.abs(m[0] - model[168][0]), side = ax > 44 && m[1] > model[1][1];   // near the temples the arms run over the face surface
-    const k = nose ? 1 : side ? .985 - Math.min(.11, (ax - 44) * .006) : .985; p.setXYZ(i, c[0] + (m[0] - c[0]) * k, c[1] + (m[1] - c[1]) * k, c[2] + (m[2] - c[2]) * k + (nose ? 1 : 0)); }
+    const ax = Math.abs(m[0] - model[168][0]);
+    const nose = ax < 13 && m[1] < eyeY - 1 && m[1] > tipY - 4;
+    // the top of the nose between the eyes is always behind the bridge of the frame: keep it well back,
+    // or it pokes through the top bar and leaves an empty notch
+    const bridge = ax < 18 && m[1] >= eyeY - 1 && m[1] < eyeY + 24;
+    const side = ax > 44 && m[1] > model[1][1];   // near the temples the arms run over the face surface
+    const k = nose ? 1 : side ? .985 - Math.min(.11, (ax - 44) * .006) : .985;
+    p.setXYZ(i, c[0] + (m[0] - c[0]) * k, c[1] + (m[1] - c[1]) * k, c[2] + (m[2] - c[2]) * k + (nose ? 1 : bridge ? -4 : 0)); }
   p.needsUpdate = true; faceGeo.computeBoundingSphere();
   const ex = (Math.abs(model[234][0]) + Math.abs(model[454][0])) / 2;
   // the back of the head hides the far arm; it stays narrower than the sides of the face so the near arm, which runs
@@ -115,14 +122,17 @@ function computeFit() {
   if (backZ < eyeZ + 10) seatZ += eyeZ + 10 - backZ;     // lenses never touch the lashes
   // the arm passes just outside the widest part of the face next to the eyes and reaches the ear
   const sideX = Math.max(...[234, 454, 127, 356, 162, 389].map(k => Math.abs(model[k][0] - midX)));
-  const earR = [sideX + 2.5, (model[356][1] + model[127][1]) / 2 + 1, (model[356][2] + model[127][2]) / 2 - 7];
+  const earR = [sideX + 2.5, (model[356][1] + model[127][1]) / 2 + 10,   // top of the ear, where the arm rests (above the side landmarks)
+    (model[356][2] + model[127][2]) / 2 - 7];
   const hy = seat.y - SPEC.padY + SPEC.hingeY, hz = seatZ - SPEC.padZ + SPEC.hingeZ;
   let tilt = Math.atan2(earR[1] - hy, hz - earR[2]) + 2 * Math.PI / 180;
   tilt = Math.max(5, Math.min(12, tilt * 57.3)) / 57.3;
   const open = Math.atan2(earR[0] - SPEC.hingeX, hz - earR[2]);
+  // the arms are not glued to the front: they angle down from the hinge to the ear, whatever the tilt of the front
+  const armDown = Math.max(0, Math.min(14 / 57.3, Math.atan2(hy - earR[1], hz - earR[2])));
   const ipd = v.len(v.sub(model[468], model[473]));
   const faceW = Math.abs(model[234][0] - model[454][0]);
-  return { midX, seat, seatZ, tilt, open, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact };
+  return { midX, seat, seatZ, tilt, open, armDown, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact };
 }
 
 function applyFit() {
@@ -131,7 +141,7 @@ function applyFit() {
   const pad = new THREE.Vector3(0, SPEC.padY, SPEC.padZ).applyEuler(r.rotation);
   r.position.set(fit.midX - pad.x, fit.seat.y + nudge - pad.y, fit.seatZ - pad.z);
   const a = Math.max(-.05, Math.min(.2, fit.open));
-  glasses.temples.L.rotation.y = -a; glasses.temples.R.rotation.y = a;
+  glasses.temples.L.rotation.set(-(fit.armDown + fit.tilt), -a, 0); glasses.temples.R.rotation.set(-(fit.armDown + fit.tilt), a, 0);
 }
 
 function renderFitCard() {
