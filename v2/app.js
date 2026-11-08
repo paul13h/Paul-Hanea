@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { studioEnv } from './env.js?v=7';
-import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=7';
-import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=7';
-import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=7';
+import { studioEnv } from './env.js?v=8';
+import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=8';
+import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=8';
+import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=8';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
-import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=7';
+import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=8';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), canvas = $('view'), videoEl = $('video');
@@ -49,9 +49,10 @@ if (QS.has('ghost')) glasses.root.traverse(o => { if (o.isMesh && o.renderOrder 
 (function addShadow() {
   const c = document.createElement('canvas'); c.width = 512; c.height = 256;
   const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 512, 256);
-  x.filter = 'blur(12px)'; x.strokeStyle = 'rgba(60,44,36,.48)'; x.lineWidth = 17;
-  for (const s of [-1, 1]) { x.beginPath(); x.ellipse(256 + s * 106, 120, 84, 66, 0, 0, Math.PI * 2); x.stroke(); }
-  x.fillStyle = 'rgba(60,44,36,.3)'; x.fillRect(150, 44, 212, 9);
+  // the shadow follows the rims of this frame, a little below them, never across the middle of the lens
+  const k = 512 / 146, px = (p, dy) => [256 + p[0] * k, 128 - (p[1] + 2.5 - dy) * k];
+  x.filter = 'blur(7px)'; x.strokeStyle = 'rgba(60,44,36,.42)'; x.lineWidth = 3.4 * k; x.lineJoin = 'round';
+  for (const c of glasses.lenses) { x.beginPath(); c.forEach((p, i) => { const [u, v] = px(p, 2.2); i ? x.lineTo(u, v) : x.moveTo(u, v); }); x.closePath(); x.stroke(); }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   const m = new THREE.Mesh(new THREE.PlaneGeometry(146, 73), new THREE.MeshBasicMaterial({ map: t, blending: THREE.MultiplyBlending, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }));
   m.position.set(0, -2.5, -13); m.renderOrder = -1; m.visible = !QS.has('ghost'); glasses.root.add(m);

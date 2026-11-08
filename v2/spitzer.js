@@ -1,7 +1,7 @@
 // Akoni Spitzer, built as true 3D geometry from its product photos and published sizes.
 // Units: mm. x right, y up, z towards the viewer. Origin: frame centre, at lens-centre height.
 import * as THREE from 'three';
-import { LENS } from './spitzer-data.js?v=7';
+import { LENS } from './spitzer-data.js?v=8';
 
 export const SPEC = {
   name: 'Akoni Spitzer', lens: 54, bridge: 18, temple: 142, price: '€ 880',
@@ -185,5 +185,5 @@ export function buildSpitzer() {
     temples[name] = pivot;
   }
   front.rotation.x = 0;
-  return { root, front, temples, materials: { metal, brushed, acetate, shield, tint, gloss } };
+  return { root, front, temples, lenses: [left, right], materials: { metal, brushed, acetate, shield, tint, gloss } };
 }
