@@ -11,11 +11,12 @@ export const SPEC = {
   // v17: the hinge sits just inside the back of the front's corner (before, it was 0.5 mm in front of it and the arm's
   // front end showed on the front), with the arm's outer side flush with the corner's outer edge (x = 70.4).
   // v18: right at the back of the corner; the arm reaches 1.2 mm into it, so there is no gap
-  // v19: hinge 2 mm lower and the arm a fixed 12° from the front's normal, as on a real frame: with the arm's line through the
-  // middle of the arm, the T then lands mid-corner and the arm's top meets the top of the corner (checked against Paul's
-  // real frame in his laptop video, 9 Nov). earY: where the arm meets the top of the ear, above the side-of-face landmarks
-  hingeX: 68.2, hingeY: +(new URLSearchParams(location.search).get('hy') ?? 14), hingeZ: 0,   // hingeZ: set below, from the shape of the corner
-  armAngle: 12, earY: 9,
+  // v21: the front leans 22° in the head (v19: 13°): its lenses are then as tall as the real frame's seen straight on, from
+  // below and from above (measured on Paul's laptop clip with the real frame). The arm aims at the ear; its line runs straight
+  // into the T whatever the angle between them, and with the hinge at 12 mm the T lands mid-corner (14.7-16.6 mm for angles
+  // of 17-25°). earY: where the arm meets the top of the ear, above the side-of-face landmarks
+  hingeX: 68.2, hingeY: +(new URLSearchParams(location.search).get('hy') ?? 12), hingeZ: 0,   // hingeZ: set below, from the shape of the corner
+  frontTilt: 22, earY: 9,
   wrapR: 320
 };
 // the front curves round the face, and its outer 5 mm turn back steeply, as the corners of the real frame do (about 65° at

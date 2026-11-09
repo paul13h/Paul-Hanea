@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { studioEnv } from './env.js?v=20';
-import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=20';
-import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=20';
-import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=20';
+import { studioEnv } from './env.js?v=21';
+import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=21';
+import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=21';
+import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=21';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
-import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=20';
+import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=21';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), canvas = $('view'), videoEl = $('video');
@@ -70,7 +70,7 @@ function withIris(m) {
   return out.concat(ring(c1), ring(c2));
 }
 // Paul (v14): the frame looks best a little lower than where his real one sits, so start 2 mm lower (= 4 taps on "Tiefer").
-const SEAT_DROP = +(QS.get('sd') ?? 2);
+const SEAT_DROP = +(QS.get('sd') ?? 2), SEAT_FALLBACK = +(QS.get('sf') ?? 6.5);
 let model = withIris(REF), tris = [], scanned = false, fit = null, nudge = -SEAT_DROP;
 
 // occluders: hide the temples behind the head and the near face
@@ -121,6 +121,13 @@ function computeFit() {
   // the bridge area only: a frame cannot rest on the brow or on the tip of the nose
   const rows = tris.length ? noseProfile(centred, tris, 7).filter(r => r.y < eyeLine - 3 && r.y > eyeLine - 19) : [];
   const seat = seatOnNose(rows, SPEC.padHalfX) || { y: eyeLine - 11, z: model[168][2] - 9, contact: false };
+  // v21: when the scan's nose profile never narrows to the pads' width (often: FaceMesh makes the top of the nose wide), the
+  // seat was taken at the very top of the bridge, ~3 mm above where the real frame sits (Paul's laptop clip with the real frame,
+  // where the scan had no contact). Paul's scans with contact put it 5.9-7.3 mm below the eye corners: use that
+  if (!seat.contact && rows.length) {
+    seat.y = eyeLine - SEAT_FALLBACK;
+    const r = rows.reduce((a, b) => Math.abs(b.y - seat.y) < Math.abs(a.y - seat.y) ? b : a); seat.z = r.z;
+  }
   const pupil = v.mul(v.add(model[468], model[473]), .5), eyeZ = Math.max(model[468][2], model[473][2]) + 2.5;
   let seatZ = seat.z;
   const backZ = seatZ - SPEC.padZ - 3.4;                 // back of the lens at the eye
@@ -145,6 +152,7 @@ function computeFit() {
   // silver line could not run straight into the T. Checked on Paul's laptop and iPhone clips with the real frame: the front
   // lands within ~1 mm of v18, the arms reach the top of the ear.
   if (RIGID_REL) tilt = RIGID_REL / 57.3 - armDown;
+  else if (SPEC.frontTilt && !QS.has('tx')) tilt = SPEC.frontTilt / 57.3;
   // distance along the arm from the hinge to the top of the ear, where the arm goes behind the ear;
   // the side landmarks are in front of the ear, so its top is EAR_BACK mm further back (checked on profile views)
   const armLen = Math.hypot(earR[0] - SPEC.hingeX, earR[1] - hy, hz - earR[2] + EAR_BACK);
@@ -189,10 +197,13 @@ const ANCHOR = [168, 6];
 // Both checked frame by frame against Paul's real Tom Ford (ghost=1 over his video, looking up, down and to the sides):
 // TILT_X: the real front leans forward more than the fitted tilt (seen from below it looks taller, from above flatter).
 // PARALLAX: in turned views the real front sits further towards the nose than the tracked bridge point suggests.
+// v21, measured with tools/align.py on Paul's laptop clip (real frame, 9 Nov): PARALLAX 2 sideways and PARALLAX_Y 5 up/down
+// (v20: 9 and 0) keep the front on the real one when turning and when looking up or down (drift ~1.5 mm instead of ~3);
+// PITCH_GAIN: below PITCH_KNEE the tracked head looks down too little (the real front looked flatter than the virtual one).
 const DEBUG_NOOCC = QS.get('occ') === '0';   // test only: draw the arms without anything hiding them
 const NOSE_Z = +(QS.get('nz') ?? -2.5), SIDE_K = +(QS.get('sk') ?? 0), ARM_MIN = +(QS.get('amin') ?? -8), EAR_BACK = +(QS.get('eb') ?? 8), EAR_Y = +(QS.get('ey') ?? SPEC.earY ?? 10), RIGID_REL = +(QS.get('rig') ?? SPEC.armAngle ?? 0);
-const PARALLAX = +(QS.get('px') ?? 9), TILT_X = +(QS.get('tx') ?? 12);
-const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
+const PARALLAX = +(QS.get('px') ?? 2), PARALLAX_Y = +(QS.get('py') ?? 5), TILT_X = +(QS.get('tx') ?? 12);
+const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55), PITCH_KNEE = +(QS.get('pk') ?? 3), PITCH_GAIN = +(QS.get('pg') ?? .7);
 const resetFilters = () => { rotF.reset(); zF.reset(); axF.reset(); ayF.reset(); pose = null; };
 
 function resize(w, h) {
@@ -213,6 +224,10 @@ function track(lms, w, h, tMs) {
   // Face tracking under-reads strong turns (the far side of the face is hidden), so add back part of the missing turn.
   const yw = yawOf(Rs), over = Math.abs(yw) - YAW_KNEE;
   if (over > 0) Rs = q.norm(q.mul(Rs, q.fromVec([0, Math.sign(yw) * YAW_GAIN * over / 57.3, 0])));
+  // v21: the same for looking down (at a laptop): measured against Paul's real frame, the tracked head is pitched up too little
+  // when he looks down, so the virtual front looked too face-on (too tall) and seemed to slide on the face
+  if (PITCH_GAIN) { const f = q.rot(Rs, [0, 0, 1]), pt = Math.atan2(f[1], Math.hypot(f[0], f[2])) * 57.3, below = PITCH_KNEE - pt;
+    if (below > 0) Rs = q.norm(q.mul(Rs, q.fromVec([PITCH_GAIN * below / 57.3, 0, 0]))); }
   // Anchor: tied to the nose bridge and inner eye corners, so the frame cannot slide on the face
   let ax = 0, ay = 0, am = [0, 0, 0];
   for (const i of ANCHOR) { ax += pts[i][0]; ay += pts[i][1]; am = v.add(am, model[i]); }
@@ -228,10 +243,10 @@ function setHead(p) {
   qObj.set(...p.R); pObj.set(...p.t); head.matrix.compose(pObj, qObj, sObj); head.matrixWorldNeedsUpdate = true; head.visible = true;
   // Parallax: when the head turns, the real frame shifts sideways against the tracked nose bridge as if it sat PARALLAX mm
   // further in front of it. Shift it sideways by that amount (not closer, which would enlarge it; up/down is handled by TILT_X).
-  if (PARALLAX) {
+  if (PARALLAX || PARALLAX_Y) {
     const c = v.mul(p.t, -1 / v.len(p.t)), ch = q.rot(q.conj(p.R), c), fc = ch[2];
     // sideways part of (head forward minus its part along the line of sight), in head coordinates
-    glasses.root.position.set(basePos.x - PARALLAX * ch[0] * fc, basePos.y, basePos.z);
+    glasses.root.position.set(basePos.x - PARALLAX * ch[0] * fc, basePos.y - PARALLAX_Y * ch[1] * fc, basePos.z);
   } else glasses.root.position.copy(basePos);
   // the arm on the side turned away from the camera is behind the head; the near arm stays fully visible up to the ear
   for (const [name, s] of [['L', -1], ['R', 1]]) { const away = q.rot(p.R, [s, 0, 0])[2]; glasses.temples[name].visible = away > -.26; }

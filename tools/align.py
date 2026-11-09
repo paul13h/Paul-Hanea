@@ -6,7 +6,7 @@ from scipy.ndimage import binary_dilation, shift as nshift
 R, clip, g = sys.argv[1:4]; f0 = int(sys.argv[4]) if len(sys.argv) > 4 else 394
 rec = {r['i']: r for r in json.load(open(f'{R}/{g}.json'))['rec']}
 out = {}
-import os
+import os; FR = float(os.environ.get("FR", ".55"))
 for i in sorted(rec):
     if i < f0 or not rec[i].get('lens') or not os.path.exists(f'{R}/{g}/{i:04d}.jpg'): continue
     a = np.asarray(Image.open(f'{R}/{g}/{i:04d}.jpg').convert('RGB')).astype(int)
@@ -14,7 +14,7 @@ for i in sorted(rec):
     if a.shape != b.shape: continue
     red = (a[..., 0] - np.maximum(a[..., 1], a[..., 2]) > 45) & (b[..., 0] - np.maximum(b[..., 1], b[..., 2]) < 35)
     (lx, ly), (rx, ry) = rec[i]['lens']; sep = np.hypot(rx - lx, ry - ly); cy = (ly + ry) / 2
-    x0, x1 = int(min(lx, rx) - .8 * sep), int(max(lx, rx) + .8 * sep); y0, y1 = int(cy - .55 * sep), int(cy + .55 * sep)
+    x0, x1 = int(min(lx, rx) - FR * sep), int(max(lx, rx) + FR * sep); y0, y1 = int(cy - .55 * sep), int(cy + .55 * sep)
     M = np.zeros(red.shape, bool); M[max(0, y0):y1, max(0, x0):x1] = red[max(0, y0):y1, max(0, x0):x1]
     if M.sum() < 200: continue
     mx, mn = b.max(2), b.min(2); D = (mx < 58) & (mx - mn < 28)
