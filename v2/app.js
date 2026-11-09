@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { studioEnv } from './env.js?v=18';
-import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=18';
-import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=18';
-import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=18';
+import { studioEnv } from './env.js?v=19';
+import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=19';
+import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=19';
+import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=19';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
-import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=18';
+import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=19';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), canvas = $('view'), videoEl = $('video');
@@ -127,7 +127,7 @@ function computeFit() {
   if (backZ < eyeZ + 10) seatZ += eyeZ + 10 - backZ;     // lenses never touch the lashes
   // the arm passes just outside the widest part of the face next to the eyes and reaches the ear
   const sideX = Math.max(...[234, 454, 127, 356, 162, 389].map(k => Math.abs(model[k][0] - midX)));
-  const earR = [sideX + 2.5, (model[356][1] + model[127][1]) / 2 + 10,   // top of the ear, where the arm rests (above the side landmarks)
+  const earR = [sideX + 2.5, (model[356][1] + model[127][1]) / 2 + EAR_Y,   // top of the ear, where the arm rests (above the side landmarks)
     (model[356][2] + model[127][2]) / 2 - 7];
   const hy = seat.y - SPEC.padY + SPEC.hingeY, hz = seatZ - SPEC.padZ + SPEC.hingeZ;
   let tilt = Math.atan2(earR[1] - hy, hz - earR[2]) + 2 * Math.PI / 180;
@@ -140,6 +140,11 @@ function computeFit() {
   // the arms are not glued to the front: they angle down from the hinge to the ear, whatever the tilt of the front
   // they may also rise a little: on Paul's head the top of the ear is higher than the hinge (real arm vs ghost, 3/4 views)
   const armDown = Math.max(ARM_MIN / 57.3, Math.min(14 / 57.3, Math.atan2(hy - earR[1], hz - earR[2])));
+  // v19, RIGID_REL (SPEC.armAngle, Tom Ford): the angle between arm and front is fixed, as on a real frame, and the front's tilt
+  // follows from where the ears are (TILT_X is then not used). With a free angle (v18) the arm met the front at ~23°, so its
+  // silver line could not run straight into the T. Checked on Paul's laptop and iPhone clips with the real frame: the front
+  // lands within ~1 mm of v18, the arms reach the top of the ear.
+  if (RIGID_REL) tilt = RIGID_REL / 57.3 - armDown;
   // distance along the arm from the hinge to the top of the ear, where the arm goes behind the ear;
   // the side landmarks are in front of the ear, so its top is EAR_BACK mm further back (checked on profile views)
   const armLen = Math.hypot(earR[0] - SPEC.hingeX, earR[1] - hy, hz - earR[2] + EAR_BACK);
@@ -185,7 +190,7 @@ const ANCHOR = [168, 6];
 // TILT_X: the real front leans forward more than the fitted tilt (seen from below it looks taller, from above flatter).
 // PARALLAX: in turned views the real front sits further towards the nose than the tracked bridge point suggests.
 const DEBUG_NOOCC = QS.get('occ') === '0';   // test only: draw the arms without anything hiding them
-const NOSE_Z = +(QS.get('nz') ?? -2.5), SIDE_K = +(QS.get('sk') ?? 0), ARM_MIN = +(QS.get('amin') ?? -8), EAR_BACK = +(QS.get('eb') ?? 8);
+const NOSE_Z = +(QS.get('nz') ?? -2.5), SIDE_K = +(QS.get('sk') ?? 0), ARM_MIN = +(QS.get('amin') ?? -8), EAR_BACK = +(QS.get('eb') ?? 8), EAR_Y = +(QS.get('ey') ?? SPEC.earY ?? 10), RIGID_REL = +(QS.get('rig') ?? SPEC.armAngle ?? 0);
 const PARALLAX = +(QS.get('px') ?? 9), TILT_X = +(QS.get('tx') ?? 12);
 const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
 const resetFilters = () => { rotF.reset(); zF.reset(); axF.reset(); ayF.reset(); pose = null; };

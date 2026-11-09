@@ -43,7 +43,7 @@ try:
     pg.evaluate(INIT,scan)
     rec=[]; t0=time.time()
     for i in range(len(frames)):
-      o=pg.evaluate(STEP,[i,L[i],i%every==0])
+      o=pg.evaluate(STEP,[i,L[i],i%every==0 and i>=int(os.environ.get('FROM','0'))])
       if 'jpg' in o: open(f'{S}/{out}/{i:04d}.jpg','wb').write(base64.b64decode(o.pop('jpg').split(',')[1]))
       rec.append(o)
     fit=pg.evaluate('''(()=>{const T=window.__tryon,f=T.fit,G=T.glasses,V=T.THREE.Vector3;

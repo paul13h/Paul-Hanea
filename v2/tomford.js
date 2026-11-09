@@ -11,7 +11,11 @@ export const SPEC = {
   // v17: the hinge sits just inside the back of the front's corner (before, it was 0.5 mm in front of it and the arm's
   // front end showed on the front), with the arm's outer side flush with the corner's outer edge (x = 70.4).
   // v18: right at the back of the corner; the arm reaches 1.2 mm into it, so there is no gap
-  hingeX: 68.2, hingeY: 16.0, hingeZ: 0,   // hingeZ: set below, from the shape of the corner
+  // v19: hinge 2 mm lower and the arm a fixed 12° from the front's normal, as on a real frame: with the arm's line through the
+  // middle of the arm, the T then lands mid-corner and the arm's top meets the top of the corner (checked against Paul's
+  // real frame in his laptop video, 9 Nov). earY: where the arm meets the top of the ear, above the side-of-face landmarks
+  hingeX: 68.2, hingeY: +(new URLSearchParams(location.search).get('hy') ?? 14), hingeZ: 0,   // hingeZ: set below, from the shape of the corner
+  armAngle: 12, earY: 9,
   wrapR: 320
 };
 // the front curves round the face, and its outer 5 mm turn back steeply, as the corners of the real frame do (about 65° at
@@ -81,17 +85,20 @@ function sweep(curve, u0, u1, n, sec, sideV = new THREE.Vector3(1, 0, 0)) {
 // flush with the corner. Its top is cut back there so it never stands above the corner. At the hinge it is as tall and wide as
 // the corner (8 x 4.2 mm), then the bottom edge rises to about 6 mm by the middle and 5.5 mm at the ear while the top stays
 // straight; it runs straight back past the ear and down behind it with a fuller tip.
-const ARM_TOP = 3.6, LINE_LEN = 22;
+const ARM_TOP = 4.6, LINE_LEN = 22, LINE_OFF = -.6, LINE_H = .9;
 function armCurve(f) {
   const ox = f.side * f.L * Math.tan(f.open);
   const pts = [new THREE.Vector3(ox, 0, f.L), new THREE.Vector3(ox / 2, 0, f.L / 2), new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -.3, -22),
     new THREE.Vector3(0, -.8, -62), new THREE.Vector3(0, -2, -112), new THREE.Vector3(0, -6, -124), new THREE.Vector3(0, -13, -134), new THREE.Vector3(0, -21, -141)];
   return new THREE.CatmullRomCurve3(pts, false, 'centripetal');
 }
+// v19: taller, as the real arm looks next to the front in Paul's laptop video: 9.5 mm at the hinge (IMG_1403), ~7 mm halfway
+// to the ear. Its top is level with the top of the corner where they meet, so the corner no longer stands above the arm.
 function armSection(u, len, f) {
-  const d = u * len - f.L, k = Math.max(0, 1 - Math.max(0, d) / 55);
-  const h = 6.3 - .8 * u + 1.7 * k ** 1.3 + (u > .9 ? 1.1 * (u - .9) / .1 : 0), w = 4.2 - 1.0 * u;
-  const top = ARM_TOP - .3 * u - (u > .9 ? .3 * (u - .9) / .1 : 0), cut = d < 0 ? -d * Math.tan(f.rel) : 0;
+  const d = u * len - f.L, k = Math.max(0, 1 - Math.max(0, d) / 80);
+  const h = 6.6 - .8 * u + 2.9 * k ** 1.3 + (u > .9 ? 1.1 * (u - .9) / .1 : 0), w = 4.2 - 1.0 * u;
+  // in front of the hinge the arm rises with its angle; it is only cut back where it would stand above the corner (y 20)
+  const top = ARM_TOP - .3 * u - (u > .9 ? .3 * (u - .9) / .1 : 0), cut = d < 0 ? Math.max(0, -d * Math.tan(f.rel) - (20 - SPEC.hingeY - ARM_TOP)) : 0;
   return { w, h: h - cut, mid: top - cut - (h - cut) / 2 };
 }
 function buildArm(f) {
@@ -108,14 +115,19 @@ function buildArm(f) {
   g.setAttribute('position', new THREE.Float32BufferAttribute(arm.pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(arm.dist.map(() => [1, 1, 1, 1]).flat(), 4));
   g.setIndex([...outer, ...inner]); g.computeVertexNormals(); g.userData.dist = arm.dist.map(x => x - f.L);
   // the silver line on the outside of the arm, from the front face to LINE_LEN mm behind the hinge seam
-  const u0 = .2 / len, u1 = (f.L + LINE_LEN) / len;
-  const ln = sweep(curve, u0, u1, 30, u => { const s = armSection(u, len, f); return [.35, 1.0, f.side * (s.w / 2 + .05), f.lineY]; });
+  // v19: one straight line through the middle of the arm, as on the real frame (v18 kept it at the T's height, which put it
+  // on the arm's bottom edge when the arm angles down from the front). It starts at the front face, where the T's stem meets it
+  const u0 = .2 / len, u1 = (f.L + LINE_LEN) / len, mid0 = armSection(f.L / len, len, f).mid + LINE_OFF;
+  const ln = sweep(curve, u0, u1, 40, u => {
+    const s = armSection(u, len, f), d = u * len - f.L;
+    return [.35, LINE_H, f.side * (s.w / 2 + .05), d < 0 ? mid0 : s.mid + LINE_OFF];
+  });
   const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(ln.pos, 3)); lg.setIndex(ln.idx); lg.computeVertexNormals();
   return { arm: g, line: lg };
 }
 
 function temple(side, mats) {
-  const grp = new THREE.Group(), geo = buildArm({ side, L: 6, open: .15, rel: .25, lineY: -2.6 });
+  const grp = new THREE.Group(), geo = buildArm({ side, L: 6, open: .15, rel: .25 });
   const arm = new THREE.Mesh(geo.arm, [mats.acetate, mats.shade]); arm.renderOrder = 3; grp.add(arm);
   const line = new THREE.Mesh(geo.line, mats.metal); line.renderOrder = 3; grp.add(line);
   // the side of the head and the ear below the arm (invisible, depth only): seen from below, as when looking up,
@@ -127,7 +139,7 @@ function temple(side, mats) {
   if (!/[?&]ub=0/.test(location.search)) grp.add(under);
   // the ear (invisible, depth only): an upright oval just outside the arm, its front edge where the arm meets the top of
   // the ear. Seen from the side the arm goes behind the ear there, as on the real frame, instead of being drawn over it.
-  const ear = new THREE.Mesh(new THREE.CircleGeometry(1, 40), occ); ear.scale.set(1, 30, 16); ear.rotation.y = Math.PI / 2; ear.renderOrder = -2;
+  const ear = new THREE.Mesh(new THREE.CircleGeometry(1, 40), occ); ear.scale.set(15, 30, 1); ear.rotation.y = Math.PI / 2; ear.renderOrder = -2;
   if (!/[?&]eo=0/.test(location.search)) grp.add(ear);
   grp.userData = { side, arm, line, ear, key: '' };
   return grp;
@@ -142,21 +154,25 @@ function setArmEnd(temples, tees, ear) {
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(pivot.quaternion);          // the arm's direction, front coordinates
     const zf = wrapZ(70.4) + .2, L = zf - SPEC.hingeZ;                                   // front face to hinge seam
     const rel = Math.atan2(-dir.y, -dir.z), open = Math.abs(Math.atan2(dir.x, -dir.z));
-    const lineY = Math.max(-3.3, Math.min(-.8, 14.6 - SPEC.hingeY - L * Math.tan(rel)));   // T on the front at y ~14.6 (IMG_1410)
-    const f = { side, L, open, rel, lineY }, key = [rel, open, lineY].map(x => x.toFixed(3)).join();
+    const f = { side, L, open, rel }, key = [rel, open].map(x => x.toFixed(3)).join();
     if (key !== u.key) {
       const geo = buildArm(f); u.arm.geometry.dispose(); u.line.geometry.dispose();
       u.arm.geometry = geo.arm; u.line.geometry = geo.line; u.key = key;
     }
     const g = u.arm.geometry, c = g.attributes.color, d = g.userData.dist;
-    for (let i = 0; i < d.length; i++) c.setW(i, Math.max(0, Math.min(1, (ear + 24 - d[i]) / 10)));
+    for (let i = 0; i < d.length; i++) c.setW(i, Math.max(0, Math.min(1, (ear + 36 - d[i]) / 10)));
     c.needsUpdate = true;
-    u.ear.position.set(side * 5.2, -14, -(ear + 14)); u.ear.rotation.set(0, Math.PI / 2 - side * .26, 0);
+    // v19: the ear is an upright oval 30 x 60 mm whose top is level with the arm, so the arm goes behind the curve of the
+    // top of the ear as on the real frame (v18 scaled the wrong axis: the oval was 2 mm wide and hid almost nothing, and the
+    // arm just faded out in front of the ear). The arm fades out behind it, out of sight.
+    u.ear.position.set(side * 5.2, -28, -(ear + 21)); u.ear.rotation.set(0, Math.PI / 2 - side * .26, 0);
     // the T: its stem runs round the corner from the crossbar to where the arm's line starts, already sloping like the arm,
     // so crossbar, stem and line read as one T with a long stem, as on the real frame seen from the side
-    const yEdge = SPEC.hingeY + lineY + L * Math.tan(rel), [cross, stem] = tees[side < 0 ? 'L' : 'R'];
+    // the T: its stem runs round the corner from the crossbar to where the arm's line starts, sloping like the arm, so
+    // crossbar, stem and line read as one straight T with a long stem, as on the real frame seen from the side
+    const yEdge = SPEC.hingeY + armSection(0, 1, { L: 0, rel: 0 }).mid + LINE_OFF + L * Math.tan(rel), [cross, stem] = tees[side < 0 ? 'L' : 'R'];
     const pts = [66.9, 67.8, 68.7, 69.6, 70.5].map(x => new THREE.Vector3(side * x, yEdge + (wrapZ(x) - wrapZ(70.4)) * Math.tan(rel), wrapZ(x) + .55));
-    const sw = sweep(new THREE.CatmullRomCurve3(pts), 0, 1, 12, () => [1.0, .5, 0, 0], new THREE.Vector3(0, 1, 0));
+    const sw = sweep(new THREE.CatmullRomCurve3(pts), 0, 1, 12, () => [1.0, LINE_H * .55, 0, 0], new THREE.Vector3(0, 1, 0));
     stem.geometry.dispose(); stem.geometry = new THREE.BufferGeometry(); stem.geometry.setAttribute('position', new THREE.Float32BufferAttribute(sw.pos, 3));
     stem.geometry.setIndex(sw.idx); stem.geometry.computeVertexNormals(); stem.position.y = 0;
     cross.position.y = pts[0].y;

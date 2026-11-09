@@ -32,3 +32,18 @@ then judge the ghost on the clip *with* the real frame. Concatenate frames and l
 first ~260 frames of the no-glasses clip, then the real-frame clip (see the v13 commit for the exact steps).
 Judge the ghost overlay by eye on looking up, looking down, straight and 3/4 frames.
 Automatic "overlap with dark pixels" scores were tried and are biased (a bigger frame always scores better), so don't trust them.
+
+## v19: does the virtual frame stay on the face? (real frame as ground truth)
+
+Paul's laptop clips of 9 Nov: `Movie on 09-11-2026 at 14.03.mov` (no glasses, same moves) and `... 13.59.mov` (wearing the
+real Tom Ford). Frames `scale=960:640` -> `real/k0`, `real/k1`; landmarks with `dump_l.py`. `kmix` = all of k0 (the scan
+finishes at frame 376) followed by all of k1, so k1 frames are kmix 394 onwards.
+
+    FROM=394 python3 tools/run_r.py real kmix gX scan "frame=tf&ghost=1" 8801 1   # FROM: only save frames from 394 on
+    python3 tools/align.py real kmix gX            # per frame: shift that lays the red ghost on the real frame
+    python3 tools/cmp.py real kmix gX out.jpg 120 -60 gX other -- 403 438   # crops: original | renders (mirrored like the page)
+
+`align.py` compares the virtual front with the dark pixels of the real frame. The shift itself has an offset (the frame sits
+2 mm low by design); what matters is how it changes with yaw and pitch, i.e. how much the glasses slide on the face when
+the head moves. The real arms near the corner can pull the result in 3/4 views. It does not work on the iPhone clip (padding,
+lighting). `SCALE=2` renders at 2x (MacBook size); cmp.py then needs a 1x render's JSON for the crop positions.
