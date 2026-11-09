@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { studioEnv } from './env.js?v=17';
-import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=17';
-import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=17';
-import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=17';
+import { studioEnv } from './env.js?v=18';
+import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=18';
+import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=18';
+import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=18';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
-import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=17';
+import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=18';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), canvas = $('view'), videoEl = $('video');
@@ -93,7 +93,8 @@ function setOccluders() {
   const p = faceGeo.attributes.position, c = [0, -8, -72];
   const eyeY = (model[133][1] + model[362][1]) / 2, tipY = model[1][1];
   for (let i = 0; i < 468; i++) { const m = model[i];
-    // the nose keeps its full size (plus 1 mm), so it can hide the far lens when the head turns
+    // the nose keeps its full size, so it can hide the far lens when the head turns. NOSE_Z: v17 and before had it 1 mm
+    // forward, which cut jagged pieces out of the near lens's rim next to the nose on turns; 2.5 mm back is clean
     const ax = Math.abs(m[0] - model[168][0]);
     const nose = ax < 13 && m[1] < eyeY - 1 && m[1] > tipY - 4;
     // the top of the nose between the eyes is always behind the bridge of the frame: keep it well back,
@@ -103,7 +104,7 @@ function setOccluders() {
     // SIDE_K: how much the sides of the face are pulled in. v15 and before pulled them in up to 11% because the arms
     // pointed into the head; with the arms outside the head the full-width cheeks hide them from below, as on the real frame
     const k = nose ? 1 : side ? .985 - Math.min(SIDE_K, (ax - 44) * .006) : .985;
-    p.setXYZ(i, c[0] + (m[0] - c[0]) * k, c[1] + (m[1] - c[1]) * k, c[2] + (m[2] - c[2]) * k + (nose ? 1 : bridge ? -4 : 0)); }
+    p.setXYZ(i, c[0] + (m[0] - c[0]) * k, c[1] + (m[1] - c[1]) * k, c[2] + (m[2] - c[2]) * k + (nose ? NOSE_Z : bridge ? -4 : 0)); }
   p.needsUpdate = true; faceGeo.computeBoundingSphere();
   const ex = (Math.abs(model[234][0]) + Math.abs(model[454][0])) / 2;
   // the back of the head hides the far arm; it stays narrower than the sides of the face so the near arm, which runs
@@ -132,6 +133,10 @@ function computeFit() {
   let tilt = Math.atan2(earR[1] - hy, hz - earR[2]) + 2 * Math.PI / 180;
   tilt = (Math.max(5, Math.min(12, tilt * 57.3)) + TILT_X) / 57.3;
   const open = Math.atan2(earR[0] - SPEC.hingeX, hz - earR[2]);
+  // each arm aims at its own side of the head: faces are not symmetric (Paul's is ~5 mm wider on one side), and aiming both at
+  // the wider side left a gap between the arm and the head on the other
+  const sideOf = ks => Math.max(...ks.map(k => Math.abs(model[k][0] - midX)));
+  const openL = Math.atan2(sideOf([234, 127, 162]) + 2.5 - SPEC.hingeX, hz - earR[2]), openR = Math.atan2(sideOf([454, 356, 389]) + 2.5 - SPEC.hingeX, hz - earR[2]);
   // the arms are not glued to the front: they angle down from the hinge to the ear, whatever the tilt of the front
   // they may also rise a little: on Paul's head the top of the ear is higher than the hinge (real arm vs ghost, 3/4 views)
   const armDown = Math.max(ARM_MIN / 57.3, Math.min(14 / 57.3, Math.atan2(hy - earR[1], hz - earR[2])));
@@ -140,7 +145,7 @@ function computeFit() {
   const armLen = Math.hypot(earR[0] - SPEC.hingeX, earR[1] - hy, hz - earR[2] + EAR_BACK);
   const ipd = v.len(v.sub(model[468], model[473]));
   const faceW = Math.abs(model[234][0] - model[454][0]);
-  return { midX, seat, seatZ, tilt, open, armDown, armLen, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact };
+  return { midX, seat, seatZ, tilt, open, openL, openR, armDown, armLen, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact };
 }
 
 const basePos = new THREE.Vector3();
@@ -153,7 +158,8 @@ function applyFit() {
   const a = Math.max(-.05, Math.min(.2, fit.open));
   // opening outwards: the left arm (x < 0) turns towards -x, the right towards +x (v14 and before had this reversed:
   // the arms ran into the head and were hidden by the cheek)
-  glasses.temples.L.rotation.set(-(fit.armDown + fit.tilt), a, 0); glasses.temples.R.rotation.set(-(fit.armDown + fit.tilt), -a, 0);
+  const aL = Math.max(-.05, Math.min(.2, fit.openL ?? fit.open)), aR = Math.max(-.05, Math.min(.2, fit.openR ?? fit.open));
+  glasses.temples.L.rotation.set(-(fit.armDown + fit.tilt), aL, 0); glasses.temples.R.rotation.set(-(fit.armDown + fit.tilt), -aR, 0);
   if (glasses.setArmEnd) glasses.setArmEnd(fit.armLen);
 }
 
@@ -179,7 +185,7 @@ const ANCHOR = [168, 6];
 // TILT_X: the real front leans forward more than the fitted tilt (seen from below it looks taller, from above flatter).
 // PARALLAX: in turned views the real front sits further towards the nose than the tracked bridge point suggests.
 const DEBUG_NOOCC = QS.get('occ') === '0';   // test only: draw the arms without anything hiding them
-const SIDE_K = +(QS.get('sk') ?? 0), ARM_MIN = +(QS.get('amin') ?? -8), EAR_BACK = +(QS.get('eb') ?? 8);
+const NOSE_Z = +(QS.get('nz') ?? -2.5), SIDE_K = +(QS.get('sk') ?? 0), ARM_MIN = +(QS.get('amin') ?? -8), EAR_BACK = +(QS.get('eb') ?? 8);
 const PARALLAX = +(QS.get('px') ?? 9), TILT_X = +(QS.get('tx') ?? 12);
 const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
 const resetFilters = () => { rotF.reset(); zF.reset(); axF.reset(); ayF.reset(); pose = null; };
@@ -278,7 +284,15 @@ function onResults(res) {
   const img = res.image, w = img.videoWidth || img.width, h = img.videoHeight || img.height, t0 = res.t ?? performance.now(), c0 = performance.now();
   resize(w, h); bgCtx.drawImage(img, 0, 0, w, h); bgTex.needsUpdate = true;
   const lms = res.multiFaceLandmarks && res.multiFaceLandmarks[0];
-  if (!lms) { head.visible = false; resetFilters(); found = 0; renderer.render(scene, camera); return; }
+  // The face tracker sometimes misses a frame or two in a fast turn. Before v18 that hid the glasses for 5 frames and
+  // restarted all smoothing, so they blinked and jumped on every quick movement. Now they hold their last pose through a
+  // short miss and carry on smoothly; only a real loss (more than LOST_MS) hides them.
+  if (!lms) {
+    if (lostAt === null) lostAt = t0;
+    if (t0 - lostAt > LOST_MS) { head.visible = false; resetFilters(); found = 0; }
+    renderer.render(scene, camera); return;
+  }
+  lostAt = null;
   found++;
   const tr = track(lms, w, h, t0);
   if (scan.on) scanStep(tr, t0);
@@ -289,6 +303,7 @@ function onResults(res) {
 }
 
 let faceMesh = null, running = false, busy = false, stream = null;
+let lostAt = null; const LOST_MS = 300;
 async function ensureMesh() {
   if (faceMesh) return;
   faceMesh = new FaceMesh({ locateFile: f => `../lib/face_mesh/${f}` });
