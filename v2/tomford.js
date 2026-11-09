@@ -86,6 +86,7 @@ function sweep(curve, u0, u1, n, sec, sideV = new THREE.Vector3(1, 0, 0)) {
 // the corner (8 x 4.2 mm), then the bottom edge rises to about 6 mm by the middle and 5.5 mm at the ear while the top stays
 // straight; it runs straight back past the ear and down behind it with a fuller tip.
 const ARM_TOP = 4.6, LINE_LEN = 22, LINE_OFF = -.6, LINE_H = .9;
+const QT = new URLSearchParams(location.search), EAR_END = +(QT.get('ee') ?? 2), EAR_FADE = +(QT.get('ef') ?? 6);
 function armCurve(f) {
   const ox = f.side * f.L * Math.tan(f.open);
   const pts = [new THREE.Vector3(ox, 0, f.L), new THREE.Vector3(ox / 2, 0, f.L / 2), new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -.3, -22),
@@ -160,12 +161,13 @@ function setArmEnd(temples, tees, ear) {
       u.arm.geometry = geo.arm; u.line.geometry = geo.line; u.key = key;
     }
     const g = u.arm.geometry, c = g.attributes.color, d = g.userData.dist;
-    for (let i = 0; i < d.length; i++) c.setW(i, Math.max(0, Math.min(1, (ear + 36 - d[i]) / 10)));
+    // v20: the arm ends where it meets the ear: it fades out over the last few mm (EAR_FADE) and the ear hides it from there on,
+    // so the end is soft like on the Jil Sander try-on and an ear a few mm off does not show as a gap or an arm across the ear.
+    // v19 let the arm's top edge run 25 mm past the ear (the ear's top was level with the arm): a thin spike over the ear.
+    for (let i = 0; i < d.length; i++) c.setW(i, Math.max(0, Math.min(1, (ear + EAR_END - d[i]) / EAR_FADE)));
     c.needsUpdate = true;
-    // v19: the ear is an upright oval 30 x 60 mm whose top is level with the arm, so the arm goes behind the curve of the
-    // top of the ear as on the real frame (v18 scaled the wrong axis: the oval was 2 mm wide and hid almost nothing, and the
-    // arm just faded out in front of the ear). The arm fades out behind it, out of sight.
-    u.ear.position.set(side * 5.2, -28, -(ear + 21)); u.ear.rotation.set(0, Math.PI / 2 - side * .26, 0);
+    // the ear: an upright oval 30 x 60 mm, its top 12 mm above the arm, so its front edge crosses the arm steeply
+    u.ear.position.set(side * 5.2, -18, -(ear + EAR_END + 12)); u.ear.rotation.set(0, Math.PI / 2 - side * .26, 0);
     // the T: its stem runs round the corner from the crossbar to where the arm's line starts, already sloping like the arm,
     // so crossbar, stem and line read as one T with a long stem, as on the real frame seen from the side
     // the T: its stem runs round the corner from the crossbar to where the arm's line starts, sloping like the arm, so
