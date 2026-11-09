@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { studioEnv } from './env.js?v=15';
-import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=15';
-import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=15';
-import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=15';
+import { studioEnv } from './env.js?v=16';
+import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=16';
+import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=16';
+import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=16';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
-import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=15';
+import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=16';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), canvas = $('view'), videoEl = $('video');
@@ -100,7 +100,9 @@ function setOccluders() {
     // or it pokes through the top bar and leaves an empty notch
     const bridge = ax < 18 && m[1] >= eyeY - 1 && m[1] < eyeY + 24;
     const side = ax > 44 && m[1] > model[1][1];   // near the temples the arms run over the face surface
-    const k = nose ? 1 : side ? .985 - Math.min(.11, (ax - 44) * .006) : .985;
+    // SIDE_K: how much the sides of the face are pulled in. v15 and before pulled them in up to 11% because the arms
+    // pointed into the head; with the arms outside the head the full-width cheeks hide them from below, as on the real frame
+    const k = nose ? 1 : side ? .985 - Math.min(SIDE_K, (ax - 44) * .006) : .985;
     p.setXYZ(i, c[0] + (m[0] - c[0]) * k, c[1] + (m[1] - c[1]) * k, c[2] + (m[2] - c[2]) * k + (nose ? 1 : bridge ? -4 : 0)); }
   p.needsUpdate = true; faceGeo.computeBoundingSphere();
   const ex = (Math.abs(model[234][0]) + Math.abs(model[454][0])) / 2;
@@ -131,10 +133,14 @@ function computeFit() {
   tilt = (Math.max(5, Math.min(12, tilt * 57.3)) + TILT_X) / 57.3;
   const open = Math.atan2(earR[0] - SPEC.hingeX, hz - earR[2]);
   // the arms are not glued to the front: they angle down from the hinge to the ear, whatever the tilt of the front
-  const armDown = Math.max(0, Math.min(14 / 57.3, Math.atan2(hy - earR[1], hz - earR[2])));
+  // they may also rise a little: on Paul's head the top of the ear is higher than the hinge (real arm vs ghost, 3/4 views)
+  const armDown = Math.max(ARM_MIN / 57.3, Math.min(14 / 57.3, Math.atan2(hy - earR[1], hz - earR[2])));
+  // distance along the arm from the hinge to the top of the ear, where the arm goes behind the ear;
+  // the side landmarks are in front of the ear, so its top is EAR_BACK mm further back (checked on profile views)
+  const armLen = Math.hypot(earR[0] - SPEC.hingeX, earR[1] - hy, hz - earR[2] + EAR_BACK);
   const ipd = v.len(v.sub(model[468], model[473]));
   const faceW = Math.abs(model[234][0] - model[454][0]);
-  return { midX, seat, seatZ, tilt, open, armDown, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact };
+  return { midX, seat, seatZ, tilt, open, armDown, armLen, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact };
 }
 
 const basePos = new THREE.Vector3();
@@ -145,7 +151,10 @@ function applyFit() {
   r.position.set(fit.midX - pad.x, fit.seat.y + nudge - pad.y, fit.seatZ - pad.z);
   basePos.copy(r.position);
   const a = Math.max(-.05, Math.min(.2, fit.open));
-  glasses.temples.L.rotation.set(-(fit.armDown + fit.tilt), -a, 0); glasses.temples.R.rotation.set(-(fit.armDown + fit.tilt), a, 0);
+  // opening outwards: the left arm (x < 0) turns towards -x, the right towards +x (v14 and before had this reversed:
+  // the arms ran into the head and were hidden by the cheek)
+  glasses.temples.L.rotation.set(-(fit.armDown + fit.tilt), a, 0); glasses.temples.R.rotation.set(-(fit.armDown + fit.tilt), -a, 0);
+  if (glasses.setArmEnd) glasses.setArmEnd(fit.armLen);
 }
 
 function renderFitCard() {
@@ -169,6 +178,8 @@ const ANCHOR = [168, 6];
 // Both checked frame by frame against Paul's real Tom Ford (ghost=1 over his video, looking up, down and to the sides):
 // TILT_X: the real front leans forward more than the fitted tilt (seen from below it looks taller, from above flatter).
 // PARALLAX: in turned views the real front sits further towards the nose than the tracked bridge point suggests.
+const DEBUG_NOOCC = QS.get('occ') === '0';   // test only: draw the arms without anything hiding them
+const SIDE_K = +(QS.get('sk') ?? 0), ARM_MIN = +(QS.get('amin') ?? -8), EAR_BACK = +(QS.get('eb') ?? 8);
 const PARALLAX = +(QS.get('px') ?? 9), TILT_X = +(QS.get('tx') ?? 12);
 const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
 const resetFilters = () => { rotF.reset(); zF.reset(); axF.reset(); ayF.reset(); pose = null; };
@@ -213,6 +224,7 @@ function setHead(p) {
   } else glasses.root.position.copy(basePos);
   // the arm on the side turned away from the camera is behind the head; the near arm stays fully visible up to the ear
   for (const [name, s] of [['L', -1], ['R', 1]]) { const away = q.rot(p.R, [s, 0, 0])[2]; glasses.temples[name].visible = away > -.26; }
+  if (DEBUG_NOOCC) { faceOcc.visible = false; skull.visible = false; glasses.root.traverse(o => { if (o.material && o.material.colorWrite === false && !o.material.stencilWrite) o.visible = false; }); }
 }
 
 // ---------------------------------------------------------------- face scan

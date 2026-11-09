@@ -36,29 +36,47 @@ function lensGeo(c) {
 }
 
 function temple(side, acetate, metal) {
-  // a tapered acetate arm, straight to the ear, then bending down behind it
-  const pts = [[0, 0, 0], [0, -.8, -62], [0, -2, -116], [0, -6, -126], [0, -13, -135], [0, -22, -141]].map(a => new THREE.Vector3(...a));   // 145 mm: straight until behind the top of the ear, then bending down (photo IMG_1411)
-  const curve = new THREE.CatmullRomCurve3(pts), N = 60, prof = [], pos = [], idx = [], col = [];
+  // the arm as on Paul's frame (photo IMG_1403): a tall flat paddle at the hinge (about 9.5 mm), tapering to about
+  // 5.5 mm by the middle, straight back past the ear, then bending down behind it with a slightly fuller tip
+  const pts = [[0, 0, 0], [0, -.8, -62], [0, -2, -112], [0, -6, -124], [0, -13, -134], [0, -21, -141]].map(a => new THREE.Vector3(...a));
+  const curve = new THREE.CatmullRomCurve3(pts), N = 72, prof = [], pos = [], idx = [], col = [], dist = [];
   for (let i = 0; i < 16; i++) { const t = i / 16 * Math.PI * 2, c = Math.cos(t), s = Math.sin(t); prof.push([Math.sign(c) * Math.abs(c) ** .35, Math.sign(s) * Math.abs(s) ** .35]); }
+  const len = curve.getLength();
   for (let i = 0; i <= N; i++) {
-    const u = i / N, p = curve.getPoint(u), tg = curve.getTangent(u).normalize();
+    const u = i / N, p = curve.getPointAt(u), tg = curve.getTangentAt(u).normalize();
     const sideV = new THREE.Vector3(1, 0, 0), up = new THREE.Vector3().crossVectors(tg, sideV).normalize().negate();
-    const h = 7.4 - 1.6 * u, w = 4.2 - 1.2 * u;   // a thick acetate arm, about 7 mm tall at the hinge
-    // the end that bends down behind the ear fades out: the ear hides it on a real head, and without an ear model
-    // a hook drawn over the cheek looks wrong
-    const al = Math.max(0, Math.min(1, (p.z + 134) / 16));
-    for (const [a, b] of prof) { const q = p.clone().addScaledVector(sideV, a * w / 2).addScaledVector(up, b * h / 2); pos.push(q.x, q.y, q.z); col.push(1, 1, 1, al); }
+    const h = 5.6 + 3.9 * Math.max(0, 1 - u / .45) ** 1.5 + (u > .9 ? 1.1 * (u - .9) / .1 : 0), w = 4.0 - .9 * u;
+    // the top edge stays straight and the paddle grows downwards, as on the real arm
+    const drop = (h - 5.6) / 2;
+    for (const [a, b] of prof) { const q = p.clone().addScaledVector(sideV, a * w / 2).addScaledVector(up, b * h / 2 - drop); pos.push(q.x, q.y, q.z); col.push(1, 1, 1, 1); dist.push(u * len); }
   }
   for (let i = 0; i < N; i++) for (let j = 0; j < 16; j++) { const a = i * 16 + j, b = i * 16 + (j + 1) % 16; idx.push(a, a + 16, b, b, a + 16, b + 16); }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4)); g.setIndex(idx); g.computeVertexNormals();
-  const grp = new THREE.Group(), arm = new THREE.Mesh(g, acetate); arm.renderOrder = 3; grp.add(arm);
-  const strip = new THREE.Mesh(new THREE.BoxGeometry(.6, 1.2, 26), metal); strip.position.set(side * 2.15, .4, -18); grp.add(strip);   // the long silver T on the outside of the arm:
-  const cross = new THREE.Mesh(new THREE.BoxGeometry(.6, 4.6, 1.2), metal); cross.position.set(side * 2.15, .4, -4.6); grp.add(cross);    // stem along the arm, short crossbar near the hinge
-  // the side of the head above the arm (invisible, depth only): seen from above, as on a laptop camera with the head
-  // tilted down, the arm runs back behind it instead of sticking up over the temple like an antenna
-  const headSide = new THREE.Mesh(new THREE.PlaneGeometry(118, 60), new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide }));
-  headSide.rotation.y = Math.PI / 2; headSide.position.set(-side * 1.0, 4.2 + 30, -(10 + 59)); headSide.renderOrder = -2; grp.add(headSide);
+  g.userData.dist = dist;
+  const grp = new THREE.Group(), arm = new THREE.Mesh(g, acetate); arm.renderOrder = 3; grp.add(arm); grp.userData.arm = arm;
+  // the stem of the silver T: starts right at the hinge, so with the T's crossbar on the front corner it reads as one piece
+  // (as on the real frame seen from the side), and runs about 24 mm back along the upper part of the arm
+  const strip = new THREE.Mesh(new THREE.BoxGeometry(.6, 1.1, 24), metal); strip.position.set(side * 2.1, .2, -12.6); grp.add(strip);
+  // the side of the head and the ear below the arm (invisible, depth only): seen from below, as when looking up,
+  // they hide the back half of the arm like on Paul's real frame; from the side or from above they are below the arm
+  // and hide nothing. Hangs 4 mm under the arm, from 48 mm behind the hinge, 14 mm towards the head to 5 mm outside it.
+  const under = new THREE.Mesh(new THREE.BoxGeometry(19, 66, 102), new THREE.MeshBasicMaterial({ colorWrite: false }));
+  under.position.set(-side * 4.5, -4 - 33, -48 - 51); under.renderOrder = -2;
+  if (!/[?&]ub=0/.test(location.search)) grp.add(under);
+  // (v15 and before also had an invisible "side of the head" panel above the arm against arms sticking up like antennas when
+  // looking down; that was really the arms pointing into the head. Paul's real arms ARE visible running up the sides of the
+  // head when he looks down, and the panel made them look too thin, so it is gone.)
   return grp;
+}
+
+// The arm disappears where it meets the ear: it passes over the top of the ear and runs behind it.
+// ear = distance along the arm from the hinge to the top of the ear (mm), from the face scan.
+function setArmEnd(temples, ear) {
+  for (const pivot of Object.values(temples)) {
+    const arm = pivot.children[0].userData.arm, g = arm.geometry, c = g.attributes.color, d = g.userData.dist;
+    for (let i = 0; i < d.length; i++) c.setW(i, Math.max(0, Math.min(1, (ear + 9 - d[i]) / 7)));
+    c.needsUpdate = true;
+  }
 }
 
 export function buildTomFord() {
@@ -66,8 +84,8 @@ export function buildTomFord() {
   const metal = new THREE.MeshStandardMaterial({ color: 0xeceef0, metalness: 1, roughness: .12, envMapIntensity: 1.3 });
   const gold = new THREE.MeshStandardMaterial({ color: 0xd9b46c, metalness: 1, roughness: .2 });   // kept for other colourways; this one has silver T's
   const lensMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: .04, metalness: 0, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: .18 });
-  // the arms are mostly seen through the lenses or against the skin: less mirror-like, so they stay black like the real ones
-  const armAcetate = acetate.clone(); armAcetate.envMapIntensity = .25; armAcetate.clearcoat = .5; armAcetate.vertexColors = true; armAcetate.transparent = true;
+  // same finish as the front: on Paul's real frame the arms catch the light just like the front does
+  const armAcetate = acetate.clone(); armAcetate.envMapIntensity = +(new URLSearchParams(location.search).get('ae') ?? .5); armAcetate.vertexColors = true; armAcetate.transparent = true;
   const armMetal = metal.clone(); armMetal.envMapIntensity = .8;
   // through a lens you see your own temple, never the arm (it runs behind the head's side):
   // the lens shapes mark the stencil, and the arms are not drawn where it is marked
@@ -95,5 +113,5 @@ export function buildTomFord() {
     const pivot = new THREE.Group(); pivot.position.set(s * SPEC.hingeX, SPEC.hingeY, SPEC.hingeZ + wrapZ(SPEC.hingeX) * 0); root.add(pivot);
     pivot.add(temple(s, armAcetate, armMetal)); temples[n] = pivot;
   }
-  return { root, front, temples, lenses: [TF_LENS_L, TF_LENS_R], materials: { acetate, metal, gold, lensMat } };
+  return { root, front, temples, lenses: [TF_LENS_L, TF_LENS_R], materials: { acetate, metal, gold, lensMat }, setArmEnd: ear => setArmEnd(temples, ear) };
 }

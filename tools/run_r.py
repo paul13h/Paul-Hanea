@@ -46,7 +46,13 @@ try:
       o=pg.evaluate(STEP,[i,L[i],i%every==0])
       if 'jpg' in o: open(f'{S}/{out}/{i:04d}.jpg','wb').write(base64.b64decode(o.pop('jpg').split(',')[1]))
       rec.append(o)
-    fit=pg.evaluate("(()=>{const f=window.__tryon.fit;return {ipd:f.ipd,faceW:f.faceW,tilt:f.tilt*57.3,contact:f.contact,seat:f.seat}})()")
+    fit=pg.evaluate('''(()=>{const T=window.__tryon,f=T.fit,G=T.glasses,V=T.THREE.Vector3;
+      const out={armLen:f.armLen,ipd:f.ipd,faceW:f.faceW,tilt:f.tilt*57.3,armDown:f.armDown*57.3,open:f.open*57.3,contact:f.contact,seat:f.seat};
+      if(G&&T.head){G.root.updateMatrixWorld(true);const inv=T.head.matrixWorld.clone().invert();
+        const hp=n=>{const p=G.temples.R.localToWorld(new V(0,0,n));p.applyMatrix4(inv);return [+p.x.toFixed(1),+p.y.toFixed(1),+p.z.toFixed(1)]};
+        out.armR=[hp(0),hp(-60),hp(-116),hp(-141)];}
+      const m=T.model; out.lm={}; for (const k of [10,152,168,6,1,33,133,362,263,127,356,234,454,93,323,162,389,21,251,468,473]) out.lm[k]=m[k].map(x=>+x.toFixed(1));
+      return out})()''')
     json.dump({'rec':rec,'fit':fit,'scanned':pg.evaluate('window.__tryon.stats().scanned')},open(f'{S}/{out}.json','w'))
     print('frames',len(rec),'sec',round(time.time()-t0),'errors',errs[:3],'fit',fit)
     b.close()
