@@ -5,8 +5,8 @@
 <script type="importmap">{"imports":{"three":"./lib/three.module.min.js"}}</script></head><body>
 <script type="module">
 import * as THREE from 'three';
-import { studioEnv } from './env.js?v=22';
-import { buildTomFord } from './tomford.js?v=22';
+import { studioEnv } from './env.js?v=23';
+import { buildTomFord } from './tomford.js?v=23';
 const Q = new URLSearchParams(location.search), W = +(Q.get('w') || 1400), H = +(Q.get('h') || 900);
 const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true, preserveDrawingBuffer: true });
 renderer.setSize(W, H); renderer.outputColorSpace = THREE.SRGBColorSpace; document.body.appendChild(renderer.domElement);

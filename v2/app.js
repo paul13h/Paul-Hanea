@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { studioEnv } from './env.js?v=22';
-import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=22';
-import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=22';
-import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=22';
+import { studioEnv } from './env.js?v=23';
+import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=23';
+import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=23';
+import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=23';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
-import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=22';
+import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=23';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), canvas = $('view'), videoEl = $('video');
@@ -184,14 +184,17 @@ function renderFitCard() {
 let pose = null, W = 0, H = 0, lastT = 0, seen = 0, found = 0;
 // Quick moves pass straight through; only tiny resting noise is filtered out.
 // Tuned on real webcam footage: calm at rest, follows fast turns without trailing behind.
-const rotF = new QuatFilter(2.5, 3), zF = new OneEuro(.8, .012), axF = new OneEuro(3, .5), ayF = new OneEuro(3, .5);
+// v23: the rotation filter reacts faster to quick turns (beta 10, was 3): on Paul's laptop clips the glasses trail the head
+// ~45% less on fast moves (p90 5.1 -> 2.8 px at the ear), while at rest they move 0.38 instead of 0.31 px per frame
+const ROT_F = (QS.get('rf') ?? '2,10').split(',').map(Number);
+const rotF = new QuatFilter(ROT_F[0], ROT_F[1]), zF = new OneEuro(.8, .012), axF = new OneEuro(3, .5), ayF = new OneEuro(3, .5);
 const ANCHOR = [168, 6];
 // Both checked frame by frame against Paul's real Tom Ford (ghost=1 over his video, looking up, down and to the sides):
 // TILT_X: the real front leans forward more than the fitted tilt (seen from below it looks taller, from above flatter).
 // PARALLAX: in turned views the real front sits further towards the nose than the tracked bridge point suggests.
 const DEBUG_NOOCC = QS.get('occ') === '0';   // test only: draw the arms without anything hiding them
 const NOSE_Z = +(QS.get('nz') ?? -2.5), SIDE_K = +(QS.get('sk') ?? 0), ARM_MIN = +(QS.get('amin') ?? -8), EAR_BACK = +(QS.get('eb') ?? 8), EAR_Y = +(QS.get('ey') ?? SPEC.earY ?? 10), RIGID_REL = +(QS.get('rig') ?? SPEC.armAngle ?? 0);
-const PARALLAX = +(QS.get('px') ?? 9), TILT_X = +(QS.get('tx') ?? 12);
+const PARALLAX = +(QS.get('px') ?? 6), TILT_X = +(QS.get('tx') ?? 12);
 const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
 const resetFilters = () => { rotF.reset(); zF.reset(); axF.reset(); ayF.reset(); pose = null; };
 
@@ -287,16 +290,21 @@ function adaptLight(ctx) {
 
 function onResults(res) {
   const img = res.image, w = img.videoWidth || img.width, h = img.videoHeight || img.height, t0 = res.t ?? performance.now(), c0 = performance.now();
-  resize(w, h); bgCtx.drawImage(img, 0, 0, w, h); bgTex.needsUpdate = true;
   const lms = res.multiFaceLandmarks && res.multiFaceLandmarks[0];
-  // The face tracker sometimes misses a frame or two in a fast turn. Before v18 that hid the glasses for 5 frames and
-  // restarted all smoothing, so they blinked and jumped on every quick movement. Now they hold their last pose through a
-  // short miss and carry on smoothly; only a real loss (more than LOST_MS) hides them.
+  // The face tracker misses frames in fast turns (on Paul's laptop clips up to 15% of the frames of a quick turn, in runs of
+  // 1-8). Before v18 that hid the glasses (blinking); v18-v22 kept them at their last pose over the new camera image, so they
+  // were left behind while the face moved on and then caught up. v23: for a short miss the whole picture, camera image and
+  // glasses, stays on the last good frame (a tiny stutter instead of glasses trailing the face); a longer one shows the
+  // camera without glasses.
   if (!lms) {
     if (lostAt === null) lostAt = t0;
+    if (head.visible && t0 - lostAt <= FREEZE_MS) return;
     if (t0 - lostAt > LOST_MS) { head.visible = false; resetFilters(); found = 0; }
+    else head.visible = false;
+    resize(w, h); bgCtx.drawImage(img, 0, 0, w, h); bgTex.needsUpdate = true;
     renderer.render(scene, camera); return;
   }
+  resize(w, h); bgCtx.drawImage(img, 0, 0, w, h); bgTex.needsUpdate = true;
   lostAt = null;
   found++;
   const tr = track(lms, w, h, t0);
@@ -308,7 +316,7 @@ function onResults(res) {
 }
 
 let faceMesh = null, running = false, busy = false, stream = null;
-let lostAt = null; const LOST_MS = 300;
+let lostAt = null; const LOST_MS = 300, FREEZE_MS = +(QS.get('fz') ?? 170);
 async function ensureMesh() {
   if (faceMesh) return;
   faceMesh = new FaceMesh({ locateFile: f => `../lib/face_mesh/${f}` });
