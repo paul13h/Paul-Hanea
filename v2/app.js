@@ -295,13 +295,14 @@ function onResults(res) {
   // were left behind while the face moved on and then caught up. v23: for a short miss the whole picture, camera image and
   // glasses, stays on the last good frame (a tiny stutter instead of glasses trailing the face); a longer one shows the
   // camera without glasses.
+  if (perf) { perf.result(!!lms); perf.size = w + '×' + h; }
   if (!lms) {
     if (lostAt === null) lostAt = t0;
-    if (head.visible && t0 - lostAt <= FREEZE_MS) return;
+    if (head.visible && t0 - lostAt <= FREEZE_MS) { if (perf) perf.frozen(); return; }
     if (t0 - lostAt > LOST_MS) { head.visible = false; resetFilters(); found = 0; }
     else head.visible = false;
     resize(w, h); bgCtx.drawImage(img, 0, 0, w, h); bgTex.needsUpdate = true;
-    renderer.render(scene, camera); return;
+    renderer.render(scene, camera); if (perf) { perf.hidden(); perf.drawn(performance.now() - c0); } return;
   }
   resize(w, h); bgCtx.drawImage(img, 0, 0, w, h); bgTex.needsUpdate = true;
   lostAt = null;
@@ -311,7 +312,67 @@ function onResults(res) {
   if (!scan.on) { setHead(tr); head.visible = found > 4; }   // a face just found again is often misread for a few frames
   if (++seen % 30 === 1) { adaptLight(bgCtx); roomEnv(img, w, h); }
   renderer.render(scene, camera);
+  if (perf) { if (!head.visible && !scan.on) perf.hidden(); perf.drawn(performance.now() - c0); }
   window.__tryon.ms = performance.now() - c0; window.__tryon.pose = tr; window.__tryon.rms = tr.raw.rms;
+}
+
+// ---------------------------------------------------------------- ?stats=1: live performance overlay (open problem 4)
+// For screen recordings in Safari. Per second: camera frames that arrived and how many of them never reached FaceMesh (it was
+// still busy with the previous one; counted from requestVideoFrameCallback's presentedFrames), FaceMesh results and its time per frame, how often the picture was redrawn and the
+// longest gap between redraws, frames held frozen (short miss) or shown without glasses (lost), and the display's own rate
+// (if that drops, the main thread is blocked). The bottom line counts everything since the page opened.
+// window.__tryon.perf has the same numbers, plus one entry per second in .log.
+const perf = QS.has('stats') ? makePerf() : null;
+function makePerf() {
+  const box = document.createElement('div'), txt = document.createElement('div'), g = document.createElement('canvas');
+  box.style.cssText = 'position:fixed;left:8px;top:calc(8px + env(safe-area-inset-top,0px));z-index:9999;pointer-events:none;' +
+    'font:11px/1.4 ui-monospace,Menlo,monospace;color:#fff;background:rgba(0,0,0,.72);padding:6px 8px;border-radius:6px;white-space:pre';
+  g.width = 240; g.height = 44; g.style.cssText = 'display:block;margin-top:4px;width:240px;height:44px';
+  box.append(txt, g); document.body.appendChild(box);
+  const gx = g.getContext('2d'), gaps = [];
+  const zero = () => ({ cam: 0, camLost: 0, sent: 0, res: 0, face: 0, frozen: 0, hidden: 0, draw: 0, raf: 0, mesh: 0, meshMax: 0, work: 0, gapMax: 0, gap50: 0 });
+  const P = { s: zero(), tot: zero(), log: [], lastDraw: 0, lastPresented: null, t: performance.now(), size: '' };
+  const add = (k, n = 1) => { P.s[k] += n; P.tot[k] += n; };
+  P.camFrame = meta => {   // requestVideoFrameCallback: presentedFrames also counts camera frames that never reached a callback
+    add('cam');
+    if (meta && meta.presentedFrames != null) { if (P.lastPresented != null) add('camLost', Math.max(0, meta.presentedFrames - P.lastPresented - 1)); P.lastPresented = meta.presentedFrames; }
+  };
+  P.sent = () => add('sent');
+  P.meshDone = ms => { add('mesh', ms); P.s.meshMax = Math.max(P.s.meshMax, ms); P.tot.meshMax = Math.max(P.tot.meshMax, ms); };
+  P.result = face => { add('res'); if (face) add('face'); };
+  P.frozen = () => add('frozen'); P.hidden = () => add('hidden');
+  P.drawn = workMs => {
+    const now = performance.now(), gap = P.lastDraw ? now - P.lastDraw : 0; P.lastDraw = now;
+    add('draw'); add('work', workMs);
+    if (gap) { gaps.push(gap); if (gaps.length > 120) gaps.shift(); P.s.gapMax = Math.max(P.s.gapMax, gap); P.tot.gapMax = Math.max(P.tot.gapMax, gap); if (gap > 50) add('gap50'); }
+  };
+  const f1 = x => x.toFixed(1), pct = (a, b) => b ? (100 * a / b).toFixed(1) + '%' : '–';
+  function tick(now) {
+    add('raf');
+    const dt = (now - P.t) / 1000;
+    if (dt >= 1) {
+      const s = P.s, r = k => s[k] / dt;
+      const e = { t: +(now / 1000).toFixed(1), camFps: +f1((s.cam + s.camLost) / dt), meshFps: +f1(r('res')), faceFps: +f1(r('face')), drawFps: +f1(r('draw')), dispFps: +f1(r('raf')),
+        meshMs: s.sent ? +f1(s.mesh / s.sent) : 0, meshMax: +f1(s.meshMax), workMs: s.draw ? +f1(s.work / s.draw) : 0, gapMax: Math.round(s.gapMax),
+        dropped: s.camLost, frozen: s.frozen, hidden: s.hidden };
+      P.log.push(e); if (P.log.length > 600) P.log.shift();
+      const T = P.tot;
+      txt.textContent =
+        `FaceMesh ${f1(e.meshFps)} fps  face ${f1(e.faceFps)}  ${f1(e.meshMs)} ms/frame (max ${f1(e.meshMax)})\n` +
+        `render   ${f1(e.drawFps)} fps  longest gap ${e.gapMax} ms  our work ${f1(e.workMs)} ms\n` +
+        `camera   ${f1(e.camFps)} fps  ${P.size}  not tracked ${e.dropped}/s\n` +
+        `frozen ${s.frozen}/s  no glasses ${s.hidden}/s  display ${f1(e.dispFps)} fps\n` +
+        `total: ${T.res} results · not tracked ${pct(T.camLost, T.cam + T.camLost)} · frozen ${T.frozen} · no glasses ${T.hidden} · gaps>50ms ${T.gap50} · worst ${Math.round(T.gapMax)} ms`;
+      P.s = zero(); P.t = now;
+    }
+    // redraw intervals, last 120 redraws; lines at 1/60, 1/30 and 1/15 s
+    gx.clearRect(0, 0, 240, 44); gx.strokeStyle = 'rgba(255,255,255,.25)'; gx.lineWidth = 1;
+    for (const ms of [16.7, 33.3, 66.7]) { const y = 44 - ms / 100 * 44; gx.beginPath(); gx.moveTo(0, y); gx.lineTo(240, y); gx.stroke(); }
+    gaps.forEach((ms, i) => { gx.fillStyle = ms > 50 ? '#ff453a' : ms > 34 ? '#ffd60a' : '#30d158'; const hh = Math.min(44, ms / 100 * 44); gx.fillRect(i * 2, 44 - hh, 1.5, hh); });
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+  return P;
 }
 
 let faceMesh = null, running = false, busy = false, stream = null;
@@ -327,9 +388,11 @@ function schedule() {
   if (!running) return;
   if (videoEl.requestVideoFrameCallback) videoEl.requestVideoFrameCallback(pump); else requestAnimationFrame(pump);
 }
-async function pump() {
+async function pump(now, meta) {
   if (!running) return;
-  if (!busy && videoEl.readyState >= 2) { busy = true; try { await faceMesh.send({ image: videoEl }); } catch (e) { console.error(e); } busy = false; }
+  if (perf && videoEl.requestVideoFrameCallback) perf.camFrame(meta);
+  if (!busy && videoEl.readyState >= 2) { busy = true; const s0 = performance.now(); if (perf) perf.sent();
+    try { await faceMesh.send({ image: videoEl }); } catch (e) { console.error(e); } busy = false; if (perf) perf.meshDone(performance.now() - s0); }
   schedule();
 }
 async function start() {
@@ -351,4 +414,4 @@ $('upBtn').addEventListener('click', () => { nudge = Math.min(5, nudge + .5); ap
 $('downBtn').addEventListener('click', () => { nudge = Math.max(-5, nudge - .5); applyFit(); renderFitCard(); });
 
 buildTris(); setOccluders(); fit = computeFit(); applyFit();
-window.__tryon = { onResults, scan, glasses, camera, head, THREE, beginScan, finishScan, get model() { return model; }, get fit() { return fit; }, cam, yawOf, render: () => renderer.render(scene, camera), resize, stats: () => ({ scanned }) };
+window.__tryon = { onResults, scan, glasses, camera, head, THREE, beginScan, finishScan, get model() { return model; }, get fit() { return fit; }, cam, yawOf, render: () => renderer.render(scene, camera), resize, stats: () => ({ scanned }), perf };
