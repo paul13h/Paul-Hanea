@@ -1169,16 +1169,8 @@
   // warm up the tracker in the background
   if (typeof FaceMesh !== 'undefined') ensureFaceMesh().catch(e => console.error(e));
 
-  // offline: cache the whole demo after the first visit
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    let reloaded = false;
-    const hadController = !!navigator.serviceWorker.controller;   // only reload for an update, never on the first visit
-    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded && !running && !startBtn.disabled) { reloaded = true; location.reload(); } });
-    navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(() => {
-      readyLine.textContent = 'Saved on this device · works without internet';
-      readyLine.classList.add('ok');
-    }).catch(() => {});
-  }
+  // the old offline cache is retired; remove it if this browser still has it
+  if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(() => {});
 
   // test hook: render a frame from a still image (used for offline checks)
   window.__tryon = { onResults, setFrame, renderer, scene, camera, models, head };

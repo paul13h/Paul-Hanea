@@ -27,10 +27,20 @@ aside h2{font:400 22px/1.2 Georgia,serif;margin:0 0 2px}aside .p{color:var(--sof
 #rescanBtn{width:100%;margin-top:8px;padding:9px;border:1px solid var(--line);border-radius:8px;background:none;color:var(--ink)}
 small{display:block;color:var(--soft);line-height:1.4;margin-top:12px}
 </style>
+<script>
+// An old offline cache from the first prototype can serve outdated try-on code. Remove it and reload once.
+(async () => { try {
+  if (!('serviceWorker' in navigator)) return;
+  const rs = await navigator.serviceWorker.getRegistrations();
+  for (const r of rs) await r.unregister();
+  if (self.caches) for (const k of await caches.keys()) await caches.delete(k);
+  if (navigator.serviceWorker.controller && !sessionStorage.getItem('swfix')) { sessionStorage.setItem('swfix', '1'); location.reload(); }
+} catch (e) {} })();
+</script>
 <script src="../lib/face_mesh/face_mesh.js"></script>
 <script type="importmap">{"imports":{"three":"./lib/three.module.min.js"}}</script>
 </head><body>
-<header><b>Tom Ford FT5902-B</b><span>Prototyp, keine Bestellung möglich · Version 25</span></header>
+<header><b>Tom Ford FT5902-B</b><span>Prototyp, keine Bestellung möglich · Version 26</span></header>
 <main>
 <div id="stage"><canvas id="view"></canvas><video id="video" playsinline muted></video>
   <div class="layer" id="startView"><h1>Finden Sie Ihre Passform</h1><p>Ein kurzer Gesichtsscan misst, wie die Brille an Ihnen sitzt. Bitte nehmen Sie eine eigene Brille vorher ab.</p><button class="primary" id="startBtn">Anprobe starten</button><p id="err"></p></div>
@@ -44,5 +54,5 @@ small{display:block;color:var(--soft);line-height:1.4;margin-top:12px}
   </div>
   <small>Alle Werte sind Schätzungen. Das Kamerabild wird nur in Ihrem Browser verarbeitet und nicht gespeichert.</small>
 </aside></main>
-<script type="module" src="app.js?v=25"></script>
+<script type="module" src="app.js?v=26"></script>
 </body></html>
