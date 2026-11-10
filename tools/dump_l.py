@@ -1,7 +1,8 @@
 import subprocess,time,sys,json,os
+root=os.environ.get('ROOT') or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from playwright.sync_api import sync_playwright
 S,clip=sys.argv[1],sys.argv[2]; frames=sorted(os.listdir(f'{S}/{clip}'))
-srv=subprocess.Popen([sys.executable,'-m','http.server',sys.argv[3] if len(sys.argv)>3 else '8800'],cwd='/home/claude/paul-hanea',stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); time.sleep(1)
+srv=subprocess.Popen([sys.executable,'-m','http.server',sys.argv[3] if len(sys.argv)>3 else '8800'],cwd=root,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); time.sleep(1)
 try:
   with sync_playwright() as p:
     b=p.chromium.launch(args=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'])

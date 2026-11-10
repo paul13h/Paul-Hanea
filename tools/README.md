@@ -47,3 +47,20 @@ finishes at frame 376) followed by all of k1, so k1 frames are kmix 394 onwards.
 2 mm low by design); what matters is how it changes with yaw and pitch, i.e. how much the glasses slide on the face when
 the head moves. The real arms near the corner can pull the result in 3/4 views. It does not work on the iPhone clip (padding,
 lighting). `SCALE=2` renders at 2x (MacBook size); cmp.py then needs a 1x render's JSON for the crop positions.
+
+## check.sh: one contact sheet of the ground-truth frames
+
+    tools/check.sh [--root DIR] [--query "k=v&k2=v2"] [--name NAME]
+
+Renders the fixed ground-truth frames with `frame=tf&ghost=1` and writes one JPG: per row the real clip crop | ghost
+render crop (mirrored like the page). Frames: imix (fov 43) front up 466/471/476, down 495/498/502, straight 452/742,
+3/4 642/712; arm ear ends 342/420 (turned), 472 (up), 496 (down); laptop `fl` (fov 46, no real frame) 500/515/545.
+- `--root`: repo/worktree whose `v2/` is served (default: repo of the script), e.g. the stability worktree.
+- `--query`: extra params appended. `--name`: output name (default `<branch>-<short hash>`).
+- Data lives outside the repo in `$TRYON_DATA` (default `~/Documents/Virtual Try-On/tryon-data`): `imix/`, `fl/` frames,
+  `L_imix.json`, `L_fl.json` landmark dumps (cached, made only if missing), `runs/NAME/{imix,fl}.json` (per-frame `rec` for
+  numbers), `sheets/NAME.jpg`. Sources: `~/Downloads/tryon-test/IMG_1402_small.mp4`, `IMG_1405_small.mp4`, the 7 Nov laptop mov.
+- Numbering is 0-based (`ffmpeg -start_number 0`, file `NNNN.jpg` = frame N). imix 0..261 = IMG_1402 0..261 (scan),
+  imix 262.. = IMG_1405 from frame 0. Tracking runs on all frames; only the listed ones are saved (`ONLY=` env of `run_r.py`).
+- `run_r.py`/`dump_l.py` honour env `ROOT` (repo to serve). First run ~2.5 min (extraction + FaceMesh dumps), reruns ~1 min.
+- `sheet.py` builds the sheet; arm crops shift towards the near ear using nose-tip vs bridge offset.
