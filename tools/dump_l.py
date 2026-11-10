@@ -6,7 +6,7 @@ try:
   with sync_playwright() as p:
     b=p.chromium.launch(args=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
     pg=b.new_page(); pg.route('**/__f/*',lambda r:r.fulfill(path=f'{S}/{clip}/'+frames[int(r.request.url.rsplit('/',1)[1])]))
-    pg.goto('http://localhost:'+(sys.argv[3] if len(sys.argv)>3 else '8800')+'/v2/index.html'); pg.evaluate('window.W=960;window.H=640'); pg.wait_for_function('window.__tryon')
+    pg.goto('http://localhost:'+(sys.argv[3] if len(sys.argv)>3 else '8800')+'/v2/spitzer.html'); pg.evaluate('window.W=960;window.H=640'); pg.wait_for_function('window.__tryon')
     pg.evaluate('''async()=>{window.cv=document.createElement('canvas');cv.width=W;cv.height=H;
      window.fm=new FaceMesh({locateFile:f=>`../lib/face_mesh/${f}`});fm.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:.6,minTrackingConfidence:.6});
      fm.onResults(r=>{window.__L=r.multiFaceLandmarks&&r.multiFaceLandmarks[0];});await fm.initialize();}''')
