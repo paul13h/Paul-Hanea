@@ -35,7 +35,7 @@ try:
     pg=b.new_page(viewport={'width':1100,'height':1100})
     errs=[]; pg.on('pageerror',lambda e:errs.append(str(e)))
     pg.route('**/__f/*',lambda r:r.fulfill(path=f'{S}/{clip}/'+frames[int(r.request.url.rsplit('/',1)[1])]))
-    pg.goto('http://localhost:'+sys.argv[6]+'/v2/spitzer.html?capture=1&'+sys.argv[5]+''); pg.evaluate('window.W=960;window.H=640'); pg.wait_for_function('window.__tryon',timeout=30000)
+    pg.goto('http://localhost:'+sys.argv[6]+'/v2/tf.html?capture=1&'+sys.argv[5]+''); pg.evaluate('window.W=960;window.H=640'); pg.wait_for_function('window.__tryon',timeout=30000)
     pg.evaluate("import('/v2/solver.js').then(m=>window.__S=m)"); time.sleep(.5)
     pg.evaluate(INIT,scan)
     rec=[]; t0=time.time()

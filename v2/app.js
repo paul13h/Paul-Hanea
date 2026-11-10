@@ -1,12 +1,11 @@
 import * as THREE from 'three';
-import { studioEnv } from './env.js?v=24';
-import { buildSpitzer, SPEC as SPEC_SP } from './spitzer.js?v=24';
-import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=24';
-import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=24';
+import { studioEnv } from './env.js?v=25';
+import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=25';
+import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=25';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
-import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=24';
+import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=25';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), canvas = $('view'), videoEl = $('video');
@@ -41,8 +40,8 @@ const FOV = +QS.get('fov') || 46;                                   // typical l
 const camera = new THREE.PerspectiveCamera(FOV, 4 / 3, 20, 3000);
 const cam = { f: 1, cx: 0, cy: 0 };
 const head = new THREE.Group(); head.matrixAutoUpdate = false; scene.add(head);
-const IS_TF = QS.get('frame') === 'tf' || document.documentElement.dataset.frame === 'tf', SPEC = IS_TF ? SPEC_TF : SPEC_SP;
-const glasses = IS_TF ? buildTomFord() : buildSpitzer(); head.add(glasses.root); head.visible = false;
+const IS_TF = true, SPEC = SPEC_TF;
+const glasses = buildTomFord(); head.add(glasses.root); head.visible = false;
 if (IS_TF) { document.title = 'Tom Ford FT5902-B – Virtuelle Anprobe'; document.querySelector('header b').textContent = 'Tom Ford FT5902-B'; document.querySelector('aside h2').textContent = 'FT5902-B'; document.querySelector('aside .p').textContent = '54□17-145 · Schwarz'; }
 if (QS.has('ghost')) glasses.root.traverse(o => { if (o.isMesh && o.material.colorWrite !== false && o.renderOrder >= 0 && o.renderOrder < 6) { o.material = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: .45, depthWrite: false }); } });
 
