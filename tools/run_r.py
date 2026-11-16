@@ -7,7 +7,8 @@ from playwright.sync_api import sync_playwright
 S,clip,out=sys.argv[1],sys.argv[2],sys.argv[3]; scan=sys.argv[4]=='scan'; every=int(sys.argv[7]) if len(sys.argv)>7 else 1
 os.makedirs(f'{S}/{out}',exist_ok=True)
 frames=sorted(os.listdir(f'{S}/{clip}')); L=json.load(open(f'{S}/L_{clip}.json'))
-root=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+root=os.environ.get('ROOT') or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ONLY=set(int(x) for x in os.environ['ONLY'].split(',')) if os.environ.get('ONLY') else None  # save only these frames (tracking still runs on all)
 srv=subprocess.Popen([sys.executable,'-m','http.server',sys.argv[6]],cwd=root,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); time.sleep(1)
 INIT='''async (scan) => {
   document.getElementById('startView').hidden = true;
@@ -43,7 +44,7 @@ try:
     pg.evaluate(INIT,scan)
     rec=[]; t0=time.time()
     for i in range(len(frames)):
-      o=pg.evaluate(STEP,[i,L[i],i%every==0 and i>=int(os.environ.get('FROM','0'))])
+      o=pg.evaluate(STEP,[i,L[i],(i in ONLY if ONLY is not None else i%every==0 and i>=int(os.environ.get('FROM','0')))])
       if 'jpg' in o: open(f'{S}/{out}/{i:04d}.jpg','wb').write(base64.b64decode(o.pop('jpg').split(',')[1]))
       rec.append(o)
     fit=pg.evaluate('''(()=>{const T=window.__tryon,f=T.fit,G=T.glasses,V=T.THREE.Vector3;
