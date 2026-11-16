@@ -8,7 +8,7 @@ S,clip,out=sys.argv[1],sys.argv[2],sys.argv[3]; scan=sys.argv[4]=='scan'; every=
 os.makedirs(f'{S}/{out}',exist_ok=True)
 frames=sorted(os.listdir(f'{S}/{clip}')); L=json.load(open(f'{S}/L_{clip}.json'))
 root=os.environ.get('ROOT') or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ONLY=set(int(x) for x in os.environ['ONLY'].split(',')) if os.environ.get('ONLY') else None  # save only these frames (tracking still runs on all)
+ONLY=set(int(x) for x in os.environ['ONLY'].split(',') if x) if os.environ.get('ONLY') else None  # save only these frames (tracking still runs on all)
 srv=subprocess.Popen([sys.executable,'-m','http.server',sys.argv[6]],cwd=root,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); time.sleep(1)
 INIT='''async (scan) => {
   document.getElementById('startView').hidden = true;
