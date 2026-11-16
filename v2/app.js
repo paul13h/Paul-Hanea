@@ -195,6 +195,8 @@ const DEBUG_NOOCC = QS.get('occ') === '0';   // test only: draw the arms without
 const NOSE_Z = +(QS.get('nz') ?? -2.5), SIDE_K = +(QS.get('sk') ?? 0), ARM_MIN = +(QS.get('amin') ?? -8), EAR_BACK = +(QS.get('eb') ?? 8), EAR_Y = +(QS.get('ey') ?? SPEC.earY ?? 10), RIGID_REL = +(QS.get('rig') ?? SPEC.armAngle ?? 0);
 const PARALLAX = +(QS.get('px') ?? 6), TILT_X = +(QS.get('tx') ?? 12);
 const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
+// test only (off by default): extra look-down pitch below PITCH_KNEE, as v21 tried (pivots at the bridge anchor, so it also lifts the ears)
+const PITCH_KNEE = +(QS.get('pk') ?? 3), PITCH_GAIN = +(QS.get('pg') ?? 0);
 const resetFilters = () => { rotF.reset(); zF.reset(); axF.reset(); ayF.reset(); pose = null; };
 
 function resize(w, h) {
@@ -215,6 +217,8 @@ function track(lms, w, h, tMs) {
   // Face tracking under-reads strong turns (the far side of the face is hidden), so add back part of the missing turn.
   const yw = yawOf(Rs), over = Math.abs(yw) - YAW_KNEE;
   if (over > 0) Rs = q.norm(q.mul(Rs, q.fromVec([0, Math.sign(yw) * YAW_GAIN * over / 57.3, 0])));
+  if (PITCH_GAIN) { const f = q.rot(Rs, [0, 0, 1]), below = PITCH_KNEE - Math.atan2(f[1], Math.hypot(f[0], f[2])) * 57.3;
+    if (below > 0) Rs = q.norm(q.mul(Rs, q.fromVec([PITCH_GAIN * below / 57.3, 0, 0]))); }
   // Anchor: tied to the nose bridge and inner eye corners, so the frame cannot slide on the face
   let ax = 0, ay = 0, am = [0, 0, 0];
   for (const i of ANCHOR) { ax += pts[i][0]; ay += pts[i][1]; am = v.add(am, model[i]); }
