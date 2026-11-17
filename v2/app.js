@@ -5,6 +5,7 @@ import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=27';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
+import { initUI } from './ui.js?v=27';
 import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=27';
 
 const $ = id => document.getElementById(id);
@@ -601,19 +602,22 @@ async function pump(now, meta) {
       await faceMesh.send({ image: src }); } catch (e) { console.error(e); } busy = false; if (perf) perf.meshDone(performance.now() - s0); }
   schedule();
 }
-async function start() {
-  $('startBtn').disabled = true; $('startBtn').textContent = 'Lädt…'; $('err').textContent = '';
+// Camera, then FaceMesh. Errors are shown by ui.js: they are thrown as { step: 'camera' | 'mesh', error }.
+// { scan: false } restarts the camera after it was disconnected, keeping the face model.
+async function start({ scan = true } = {}) {
+  let step = 'camera';
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } } });
-    videoEl.srcObject = stream; await videoEl.play(); await ensureMesh();
-  } catch (e) {
-    console.error(e); $('err').textContent = e && e.name === 'NotAllowedError' ? 'Bitte erlauben Sie den Zugriff auf die Kamera.' : 'Die Kamera konnte nicht gestartet werden.';
-    $('startBtn').disabled = false; $('startBtn').textContent = 'Anprobe starten'; return;
+    videoEl.srcObject = stream; await videoEl.play();
+    step = 'mesh'; await ensureMesh();
+  } catch (error) {
+    console.error(error); if (stream) stream.getTracks().forEach(t => t.stop()); stream = null;
+    throw { step, error };
   }
-  startView.hidden = true; running = true; beginScan(); schedule();
+  startView.hidden = true; running = true; if (scan) beginScan(); schedule();
+  return stream;
 }
 
-$('startBtn').addEventListener('click', start);
 $('skipBtn').addEventListener('click', () => { if (scan.on) finishScan(); });
 $('rescanBtn').addEventListener('click', () => { model = withIris(REF); resetFilters(); beginScan(); });
 $('upBtn').addEventListener('click', () => { nudge = Math.min(5, nudge + .5); applyFit(); renderFitCard(); });
@@ -621,6 +625,8 @@ $('downBtn').addEventListener('click', () => { nudge = Math.max(-5, nudge - .5);
 
 buildTris(); setOccluders(); fit = computeFit(); applyFit();
 if (POST_ON) { post = makePost(); assignLayers(); }
-if (!QS.has('nopre')) ensureMesh().catch(e => console.error(e));   // preload while the start page is shown
+const preload = QS.has('nopre') ? null : ensureMesh();   // preload while the start page is shown
+if (preload) preload.catch(e => console.error(e));
 window.__tryon = { onResults, scan, glasses, camera, head, THREE, beginScan, finishScan, get model() { return model; }, get fit() { return fit; }, cam, yawOf, render: draw, resize, stats: () => ({ scanned }), perf, look };
 if (QS.has("bench")) window.__tryon.bench = () => { const t = f => { const a = performance.now(); for (let i = 0; i < 20; i++) f(); return +((performance.now() - a) / 20).toFixed(2); }; const p = window.__tryon.pose.pts; return { light: t(() => adaptLight(bgCtx)), soft: t(() => { look.sigs.length = 0; measureSoft(bgCtx, p); }), env: t(() => roomEnv(bg, W, H)) }; };
+initUI({ start, preload });
