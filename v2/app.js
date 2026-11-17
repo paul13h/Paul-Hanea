@@ -30,9 +30,26 @@ function roomEnv(img, w, h) {
   envX.fillStyle = g; envX.fillRect(0, 0, 256, 128);
   envX.fillStyle = 'rgba(255,255,255,.95)'; envX.fillRect(118, 6, 20, 14);   // a soft ceiling light for highlights on metal and gloss
   envX.filter = 'blur(3px)'; envX.fillStyle = 'rgba(255,255,255,.75)'; envX.fillRect(150, 22, 44, 30); envX.fillRect(52, 26, 30, 24); envX.filter = 'none';   // windows / bright walls
-  const t = new THREE.CanvasTexture(envC); t.mapping = THREE.EquirectangularReflectionMapping; t.colorSpace = THREE.SRGBColorSpace;
+  const t = HDR ? hdrEnv() : new THREE.CanvasTexture(envC); t.mapping = THREE.EquirectangularReflectionMapping; if (!HDR) t.colorSpace = THREE.SRGBColorSpace;
   const rt = pmrem.fromEquirectangular(t); t.dispose();
   if (envRT) envRT.dispose(); envRT = rt; scene.environment = rt.texture;
+}
+// v28 (polish): the camera image tops out at white, but the lamps and windows it shows are many times brighter than the walls.
+// Glossy acetate looks glossy because it mirrors exactly those: dark everywhere, small bright highlights. With the clipped
+// image as the room, the frame mirrored a dull grey everywhere instead. The brightest parts are now expanded (x up to 1 + HDR
+// at white, from luminance HDR_KNEE up), as a half-float image. ?hdr=0: the old 8-bit room.
+const HDR = +(QS.get('hdr') ?? 10), HDR_KNEE = +(QS.get('hk') ?? .7);
+const envPx = new Uint16Array(256 * 128 * 4), S2L = Float32Array.from({ length: 256 }, (_, i) => { const c = i / 255; return c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4; });
+const H1 = THREE.DataUtils.toHalfFloat(1);
+function hdrEnv() {
+  const d = envX.getImageData(0, 0, 256, 128).data, half = THREE.DataUtils.toHalfFloat;
+  for (let y = 0; y < 128; y++) for (let x = 0; x < 256; x++) {
+    const i = (y * 256 + x) * 4, o = ((127 - y) * 256 + x) * 4, r = S2L[d[i]], g = S2L[d[i + 1]], b = S2L[d[i + 2]];
+    const l = .2126 * r + .7152 * g + .0722 * b, k = Math.max(0, (l - HDR_KNEE) / (1 - HDR_KNEE)), m = 1 + HDR * k * k;
+    envPx[o] = half(r * m); envPx[o + 1] = half(g * m); envPx[o + 2] = half(b * m); envPx[o + 3] = H1;
+  }
+  const t = new THREE.DataTexture(envPx, 256, 128, THREE.RGBAFormat, THREE.HalfFloatType);
+  t.magFilter = t.minFilter = THREE.LinearFilter; t.colorSpace = THREE.LinearSRGBColorSpace; t.needsUpdate = true; return t;
 }
 const bg = document.createElement('canvas'), bgCtx = bg.getContext('2d', { alpha: false });
 const bgTex = new THREE.CanvasTexture(bg); bgTex.colorSpace = THREE.SRGBColorSpace; scene.background = bgTex;
