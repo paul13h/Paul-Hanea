@@ -43,7 +43,7 @@ const head = new THREE.Group(); head.matrixAutoUpdate = false; scene.add(head);
 const IS_TF = true, SPEC = SPEC_TF;
 const glasses = buildTomFord(); head.add(glasses.root); head.visible = false;
 if (IS_TF) { document.title = 'Tom Ford FT5902-B – Virtuelle Anprobe'; document.querySelector('header b').textContent = 'Tom Ford FT5902-B'; document.querySelector('aside h2').textContent = 'FT5902-B'; document.querySelector('aside .p').textContent = '54□17-145 · Schwarz'; }
-if (QS.has('ghost')) glasses.root.traverse(o => { if (o.isMesh && o.material.colorWrite !== false && o.renderOrder >= 0 && o.renderOrder < 6) { o.material = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: .45, depthWrite: false }); } });
+if (QS.has('ghost')) glasses.root.traverse(o => { if (o.isMesh && o.material.colorWrite !== false && o.renderOrder >= 0 && o.renderOrder < 6) { o.material = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: .45, depthWrite: false, vertexColors: [].concat(o.material).some(m => m.vertexColors) }); } });
 
 // soft contact shadow that the frame casts on the face
 (function addShadow() {
@@ -163,7 +163,7 @@ let armLenNow = 0;
 function placeFit(extra = 0) {
   const r = glasses.root, place = tilt => { r.rotation.set(tilt, 0, 0);
     const pad = new THREE.Vector3(0, SPEC.padY, SPEC.padZ).applyEuler(r.rotation);
-    r.position.set(fit.midX - pad.x, fit.seat.y + nudge - pad.y, fit.seatZ - pad.z);
+    r.position.set(fit.midX - pad.x + OFF[0], fit.seat.y + nudge - pad.y + OFF[1], fit.seatZ - pad.z + OFF[2]);
     const h = new THREE.Vector3(0, SPEC.hingeY, SPEC.hingeZ).applyEuler(r.rotation).add(r.position);
     return [Math.atan2(h.y - fit.earY, h.z - fit.earZ), Math.hypot(fit.earX - SPEC.hingeX, h.y - fit.earY, h.z - fit.earZ + EAR_BACK)]; };
   let armDown = fit.armDown, tilt = fit.tilt, armLen = fit.armLen;
@@ -186,6 +186,10 @@ function applyFit() {
 // the front too tall looking up, and turning the whole head further lifts the arm ends off the ears (v21). So only the front
 // leans further forward, about the nose pads, by DOWN_GAIN degrees per degree that the camera is above the face's forward
 // direction (beyond DOWN_KNEE, at most DOWN_MAX), fading out in turned views, where it has not been checked.
+// Tuned 17 Nov on both clips with the real frame (outer height of the front at the lens centre, real / dg=0 / gain 1 max 26 /
+// gain 2 max 16 = now): iPhone imix 495 29.5 / 38.5 / 24.5 / 30 mm, imix 603 38.5 / 43.5 / 40 / 38.5; laptop kmix 664 28 / 43 / 31 /
+// 31.5. Gain 1 hid the iris behind the top bar on the iPhone (bar's inner edge 9 mm too low); the laptop also needs the tilt at
+// mild look-down (kmix 655/656/680/682, el 6-10), which gain 2 gives.
 function poseFit(p) {
   if (!fit || !DOWN_GAIN) return;
   const c = v.mul(p.t, -1 / v.len(p.t)), ch = q.rot(q.conj(p.R), c);        // direction to the camera, in head coordinates
@@ -221,7 +225,10 @@ const ANCHOR = [168, 6], ANCHOR_PNP = +(QS.get('ap') ?? 0);
 const DEBUG_NOOCC = QS.get('occ') === '0';   // test only: draw the arms without anything hiding them
 const NOSE_Z = +(QS.get('nz') ?? -2.5), SIDE_K = +(QS.get('sk') ?? 0), ARM_MIN = +(QS.get('amin') ?? -8), EAR_BACK = +(QS.get('eb') ?? 8), EAR_Y = +(QS.get('ey') ?? SPEC.earY ?? 10), RIGID_REL = +(QS.get('rig') ?? SPEC.armAngle ?? 0);
 const PARALLAX = +(QS.get('px') ?? 6), TILT_X = +(QS.get('tx') ?? 12);
-const DOWN_KNEE = +(QS.get('dk') ?? 2), DOWN_GAIN = +(QS.get('dg') ?? 1), DOWN_MAX = +(QS.get('dm') ?? 26), DOWN_TURN = +(QS.get('dt') ?? 50), DOWN_LEN = +(QS.get('dl') ?? 1);
+const DOWN_KNEE = +(QS.get('dk') ?? 2), DOWN_GAIN = +(QS.get('dg') ?? 2), DOWN_MAX = +(QS.get('dm') ?? 16), DOWN_TURN = +(QS.get('dt') ?? 50), DOWN_LEN = +(QS.get('dl') ?? 1);
+// OFF (test, ?ox/oy/oz, mm in head coordinates): a constant offset of the frame on the head, e.g. the drift track's fitted
+// D = (+3, -2, 0) on the laptop clip (tools/drift/offset3d.mjs)
+const OFF = ['ox', 'oy', 'oz'].map(k => +(QS.get(k) ?? 0));
 const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
 // test only (off by default): extra look-down pitch below PITCH_KNEE, as v21 tried (pivots at the bridge anchor, so it also lifts the ears)
 const PITCH_KNEE = +(QS.get('pk') ?? 3), PITCH_GAIN = +(QS.get('pg') ?? 0);
