@@ -66,7 +66,7 @@ const head = new THREE.Group(); head.matrixAutoUpdate = false; scene.add(head);
 const IS_TF = true, SPEC = SPEC_TF;
 const glasses = buildTomFord(); head.add(glasses.root); head.visible = false;
 if (IS_TF) { document.title = 'Tom Ford FT5902-B – Virtuelle Anprobe'; document.querySelector('header b').textContent = 'Tom Ford FT5902-B'; document.querySelector('aside h2').textContent = 'FT5902-B'; document.querySelector('aside .p').textContent = '54□17-145 · Schwarz'; }
-if (QS.has('ghost')) glasses.root.traverse(o => { if (o.isMesh && o.material.colorWrite !== false && o.renderOrder >= 0 && o.renderOrder < 6) { o.material = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: .45, depthWrite: false }); } });
+if (QS.has('ghost')) glasses.root.traverse(o => { if (o.isMesh && o.material.colorWrite !== false && o.renderOrder >= 0 && o.renderOrder < 6) { o.material = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: .45, depthWrite: false, vertexColors: [].concat(o.material).some(m => m.vertexColors) }); } });
 
 // soft contact shadow that the frame casts on the face
 (function addShadow() {
@@ -273,22 +273,53 @@ function computeFit() {
   const armLen = Math.hypot(earR[0] - SPEC.hingeX, earR[1] - hy, hz - earR[2] + EAR_BACK);
   const ipd = v.len(v.sub(model[468], model[473]));
   const faceW = Math.abs(model[234][0] - model[454][0]);
-  return { midX, seat, seatZ, tilt, open, openL, openR, armDown, armLen, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact };
+  return { midX, seat, seatZ, tilt, open, openL, openR, armDown, armLen, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact, earX: earR[0], earY: earR[1], earZ: earR[2] };
 }
 
 const basePos = new THREE.Vector3();
-function applyFit() {
-  if (!fit) return;
-  const r = glasses.root; r.rotation.set(fit.tilt, 0, 0);
-  const pad = new THREE.Vector3(0, SPEC.padY, SPEC.padZ).applyEuler(r.rotation);
-  r.position.set(fit.midX - pad.x, fit.seat.y + nudge - pad.y, fit.seatZ - pad.z);
-  basePos.copy(r.position);
-  const a = Math.max(-.05, Math.min(.2, fit.open));
+// downTilt: extra forward tilt of the front while the head looks down at the camera (set per frame by poseFit, degrees)
+let downTilt = 0;
+// Places the front and the arms. The front turns about the nose pads; `extra` (degrees) is added to the fitted tilt, and the
+// arms are re-aimed from the moved hinge at the same ear point, so their ear ends stay where the fit put them. DOWN_LEN (dl):
+// the arm's length to the ear is also re-measured from the moved hinge (the hinge comes up to ~8 mm forward; without this the arm
+// faded out that much short of the ear).
+let armLenNow = 0;
+function placeFit(extra = 0) {
+  const r = glasses.root, place = tilt => { r.rotation.set(tilt, 0, 0);
+    const pad = new THREE.Vector3(0, SPEC.padY, SPEC.padZ).applyEuler(r.rotation);
+    r.position.set(fit.midX - pad.x + OFF[0], fit.seat.y + nudge - pad.y + OFF[1], fit.seatZ - pad.z + OFF[2]);
+    const h = new THREE.Vector3(0, SPEC.hingeY, SPEC.hingeZ).applyEuler(r.rotation).add(r.position);
+    return [Math.atan2(h.y - fit.earY, h.z - fit.earZ), Math.hypot(fit.earX - SPEC.hingeX, h.y - fit.earY, h.z - fit.earZ + EAR_BACK)]; };
+  let armDown = fit.armDown, tilt = fit.tilt, armLen = fit.armLen;
+  if (extra) { const [a0, l0] = place(tilt); tilt += extra / 57.3; const [a1, l1] = place(tilt); armDown += a1 - a0; if (DOWN_LEN) armLen += l1 - l0; }
+  else place(tilt);
+  basePos.copy(r.position); armLenNow = armLen;
   // opening outwards: the left arm (x < 0) turns towards -x, the right towards +x (v14 and before had this reversed:
   // the arms ran into the head and were hidden by the cheek)
   const aL = Math.max(-.05, Math.min(.2, fit.openL ?? fit.open)), aR = Math.max(-.05, Math.min(.2, fit.openR ?? fit.open));
-  glasses.temples.L.rotation.set(-(fit.armDown + fit.tilt), aL, 0); glasses.temples.R.rotation.set(-(fit.armDown + fit.tilt), -aR, 0);
-  if (glasses.setArmEnd) glasses.setArmEnd(fit.armLen);
+  glasses.temples.L.rotation.set(-(armDown + tilt), aL, 0); glasses.temples.R.rotation.set(-(armDown + tilt), -aR, 0);
+}
+function applyFit() {
+  if (!fit) return;
+  placeFit(downTilt);
+  if (glasses.setArmEnd) glasses.setArmEnd(armLenNow);
+}
+// Looking down at the camera, Paul's real front is much flatter than a front that keeps its fitted tilt: on the laptop clip
+// of 9 Nov (frames 656-680) its bottom rim matched, but its top bar and hinges were 7-10 mm lower in the picture, while the
+// arm ends were on the ears. Looking up and straight it matched. A fixed larger arm angle (rig) fixes looking down but makes
+// the front too tall looking up, and turning the whole head further lifts the arm ends off the ears (v21). So only the front
+// leans further forward, about the nose pads, by DOWN_GAIN degrees per degree that the camera is above the face's forward
+// direction (beyond DOWN_KNEE, at most DOWN_MAX), fading out in turned views, where it has not been checked.
+// Tuned 17 Nov on both clips with the real frame (outer height of the front at the lens centre, real / dg=0 / gain 1 max 26 /
+// gain 2 max 16 = now): iPhone imix 495 29.5 / 38.5 / 24.5 / 30 mm, imix 603 38.5 / 43.5 / 40 / 38.5; laptop kmix 664 28 / 43 / 31 /
+// 31.5. Gain 1 hid the iris behind the top bar on the iPhone (bar's inner edge 9 mm too low); the laptop also needs the tilt at
+// mild look-down (kmix 655/656/680/682, el 6-10), which gain 2 gives.
+function poseFit(p) {
+  if (!fit || !DOWN_GAIN) return;
+  const c = v.mul(p.t, -1 / v.len(p.t)), ch = q.rot(q.conj(p.R), c);        // direction to the camera, in head coordinates
+  const el = Math.asin(Math.max(-1, Math.min(1, ch[1]))) * 57.3, turn = Math.atan2(Math.abs(ch[0]), ch[2]) * 57.3;
+  const d = Math.max(0, Math.min(DOWN_MAX, DOWN_GAIN * (el - DOWN_KNEE))) * Math.max(0, Math.min(1, (DOWN_TURN - turn) / 20));
+  if (Math.abs(d - downTilt) > .02) { downTilt = d; placeFit(d); if (glasses.setArmEnd) glasses.setArmEnd(armLenNow); }
 }
 
 function renderFitCard() {
@@ -318,6 +349,10 @@ const ANCHOR = [168, 6], ANCHOR_PNP = +(QS.get('ap') ?? 0);
 const DEBUG_NOOCC = QS.get('occ') === '0';   // test only: draw the arms without anything hiding them
 const NOSE_Z = +(QS.get('nz') ?? -2.5), SIDE_K = +(QS.get('sk') ?? 0), ARM_MIN = +(QS.get('amin') ?? -8), EAR_BACK = +(QS.get('eb') ?? 8), EAR_Y = +(QS.get('ey') ?? SPEC.earY ?? 10), RIGID_REL = +(QS.get('rig') ?? SPEC.armAngle ?? 0);
 const PARALLAX = +(QS.get('px') ?? 6), TILT_X = +(QS.get('tx') ?? 12);
+const DOWN_KNEE = +(QS.get('dk') ?? 2), DOWN_GAIN = +(QS.get('dg') ?? 2), DOWN_MAX = +(QS.get('dm') ?? 16), DOWN_TURN = +(QS.get('dt') ?? 50), DOWN_LEN = +(QS.get('dl') ?? 1);
+// OFF (test, ?ox/oy/oz, mm in head coordinates): a constant offset of the frame on the head, e.g. the drift track's fitted
+// D = (+3, -2, 0) on the laptop clip (tools/drift/offset3d.mjs)
+const OFF = ['ox', 'oy', 'oz'].map(k => +(QS.get(k) ?? 0));
 const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
 // test only (off by default): extra look-down pitch below PITCH_KNEE, as v21 tried (pivots at the bridge anchor, so it also lifts the ears)
 const PITCH_KNEE = +(QS.get('pk') ?? 3), PITCH_GAIN = +(QS.get('pg') ?? 0);
@@ -359,6 +394,7 @@ function track(lms, w, h, tMs) {
 
 const qObj = new THREE.Quaternion(), pObj = new THREE.Vector3(), sObj = new THREE.Vector3(1, 1, 1);
 function setHead(p) {
+  poseFit(p);   // fit: look-down tilt of the front (sets basePos before it is used below)
   qObj.set(...p.R); pObj.set(...p.t); head.matrix.compose(pObj, qObj, sObj); head.matrixWorldNeedsUpdate = true; head.visible = true;
   // Parallax: when the head turns, the real frame shifts sideways against the tracked nose bridge as if it sat PARALLAX mm
   // further in front of it. Shift it sideways by that amount (not closer, which would enlarge it; up/down is handled by TILT_X).
