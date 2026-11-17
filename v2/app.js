@@ -6,6 +6,7 @@ import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=27';
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
 import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=27';
+import { initOcc } from './occluder.js?v=27';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), canvas = $('view'), videoEl = $('video');
@@ -78,6 +79,7 @@ const faceGeo = new THREE.BufferGeometry();
 faceGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(468 * 3), 3));
 const faceOcc = new THREE.Mesh(faceGeo, occMat); faceOcc.renderOrder = -2; faceOcc.frustumCulled = false; head.add(faceOcc);
 const skull = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 24), occMat); skull.renderOrder = -2; skull.visible = false; head.add(skull);
+const occ = initOcc({ THREE, head, faceGeo, QS });   // ?oc=1: occluders v2 (v2/occluder.js)
 
 function buildTris() {
   if (typeof FACEMESH_TESSELATION === 'undefined') return;
@@ -90,12 +92,12 @@ function buildTris() {
 
 function setOccluders() {
   const p = faceGeo.attributes.position, c = [0, -8, -72];
-  const eyeY = (model[133][1] + model[362][1]) / 2, tipY = model[1][1];
+  const eyeY = (model[133][1] + model[362][1]) / 2, tipY = model[1][1], isNose = [];
   for (let i = 0; i < 468; i++) { const m = model[i];
     // the nose keeps its full size, so it can hide the far lens when the head turns. NOSE_Z: v17 and before had it 1 mm
     // forward, which cut jagged pieces out of the near lens's rim next to the nose on turns; 2.5 mm back is clean
     const ax = Math.abs(m[0] - model[168][0]);
-    const nose = ax < 13 && m[1] < eyeY - 1 && m[1] > tipY - 4;
+    const nose = isNose[i] = ax < 13 && m[1] < eyeY - 1 && m[1] > tipY - 4;
     // the top of the nose between the eyes is always behind the bridge of the frame: keep it well back,
     // or it pokes through the top bar and leaves an empty notch
     const bridge = ax < 18 && m[1] >= eyeY - 1 && m[1] < eyeY + 24;
@@ -104,7 +106,7 @@ function setOccluders() {
     // pointed into the head; with the arms outside the head the full-width cheeks hide them from below, as on the real frame
     const k = nose ? 1 : side ? .985 - Math.min(SIDE_K, (ax - 44) * .006) : .985;
     p.setXYZ(i, c[0] + (m[0] - c[0]) * k, c[1] + (m[1] - c[1]) * k, c[2] + (m[2] - c[2]) * k + (nose ? NOSE_Z : bridge ? -4 : 0)); }
-  p.needsUpdate = true; faceGeo.computeBoundingSphere();
+  p.needsUpdate = true; faceGeo.computeBoundingSphere(); occ.build(model, isNose, NOSE_Z);
   const ex = (Math.abs(model[234][0]) + Math.abs(model[454][0])) / 2;
   // the back of the head hides the far arm; it stays narrower than the sides of the face so the near arm, which runs
   // just outside the head, is never hidden
@@ -245,6 +247,7 @@ function setHead(p) {
   } else glasses.root.position.copy(basePos);
   // the arm on the side turned away from the camera is behind the head; the near arm stays fully visible up to the ear
   for (const [name, s] of [['L', -1], ['R', 1]]) { const away = q.rot(p.R, [s, 0, 0])[2]; glasses.temples[name].visible = away > -.26; }
+  occ.frame(p.R, p.t);
   if (DEBUG_NOOCC) { faceOcc.visible = false; skull.visible = false; glasses.root.traverse(o => { if (o.material && o.material.colorWrite === false && !o.material.stencilWrite) o.visible = false; }); }
 }
 
@@ -452,4 +455,4 @@ $('downBtn').addEventListener('click', () => { nudge = Math.max(-5, nudge - .5);
 
 buildTris(); setOccluders(); fit = computeFit(); applyFit();
 if (!QS.has('nopre')) ensureMesh().catch(e => console.error(e));   // preload while the start page is shown
-window.__tryon = { onResults, scan, glasses, camera, head, THREE, beginScan, finishScan, get model() { return model; }, get fit() { return fit; }, cam, yawOf, render: () => renderer.render(scene, camera), resize, stats: () => ({ scanned }), perf };
+window.__tryon = { onResults, scan, glasses, camera, head, THREE, beginScan, finishScan, get model() { return model; }, get fit() { return fit; }, cam, yawOf, render: () => renderer.render(scene, camera), resize, stats: () => ({ scanned }), perf, occ };
