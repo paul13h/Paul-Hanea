@@ -71,10 +71,14 @@ async function begin(opts) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return showError('unsupported');
   if (!running) { $('startView').hidden = false; busy('Kamera wird angefragt…'); $('preStatus').textContent = 'Bitte erlauben Sie den Zugriff auf die Kamera, wenn Ihr Browser danach fragt.'; }
   // once the camera is allowed, the rest of the wait is FaceMesh
-  const t = setInterval(() => { const v = $('video'); if (v.srcObject && !running) { busy('Gesichtserkennung wird geladen…'); $('preStatus').textContent = ''; clearInterval(t); } }, 150);
+  // FaceMesh that never finishes loading (a stalled download) must not leave the customer waiting forever
+  let slow = 0;
+  const t = setInterval(() => { const v = $('video'); if (v.srcObject && !running) { busy('Gesichtserkennung wird geladen…'); $('preStatus').textContent = ''; clearInterval(t);
+    slow = setTimeout(() => { showError('mesh'); $('retryBtn').hidden = true; $('reloadBtn').className = 'primary'; $('reloadBtn').focus(); }, 45000); } }, 150);
+  const done = () => { clearInterval(t); clearTimeout(slow); busy(''); $('preStatus').textContent = ''; };
   try { stream = await startFn(opts); }
-  catch (x) { clearInterval(t); busy(''); $('preStatus').textContent = ''; return showError(x && x.step || 'camera', x && x.error || x); }
-  clearInterval(t); busy(''); $('preStatus').textContent = '';
+  catch (x) { done(); return showError(x && x.step || 'camera', x && x.error || x); }
+  done(); $('errView').hidden = true;   // if it was only slow, carry on
   running = true; lastPoseAt = performance.now(); lastPose = T().pose;
   for (const tr of stream.getVideoTracks()) tr.addEventListener('ended', () => { if (stream && stream.getVideoTracks().includes(tr)) showError('ended'); });
 }
@@ -83,7 +87,7 @@ function showError(step, e) {
   const [title, text, help, retry] = errorCopy(step, e);
   $('errTitle').textContent = title; $('errText').textContent = text; $('errHelp').textContent = help;
   $('err').textContent = title;
-  $('retryBtn').hidden = !retry; $('reloadBtn').hidden = false;
+  $('retryBtn').hidden = !retry; $('reloadBtn').hidden = false; $('reloadBtn').className = retry ? 'ghostbtn' : 'primary';
   $('startView').hidden = true; $('tools').hidden = true; $('guide').hidden = true; setHint(null);
   $('errView').hidden = false; $('stage').scrollIntoView({ block: 'nearest' }); (retry ? $('retryBtn') : $('reloadBtn')).focus();
 }
@@ -113,7 +117,7 @@ function faceState(now) {
   const t = T(), p = t.pose, v = $('video');
   if (p !== lastPose) { lastPose = p; lastPoseAt = now; }
   const stale = now - lastPoseAt;
-  if (!p || stale > 450) return dark ? 'lostDark' : 'lost';
+  if (!p || stale > 1000) return dark ? 'lostDark' : 'lost';
   const vw = v.videoWidth || 1280, vh = v.videoHeight || 720, pts = p.pts;
   const fw = Math.hypot(pts[234][0] - pts[454][0], pts[234][1] - pts[454][1]) / Math.max(vw, vh);
   if (fw > .42) return 'close';
