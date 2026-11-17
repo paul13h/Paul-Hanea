@@ -5,11 +5,17 @@
 //    hides it (Paul's real frame, iPhone clip, yaw 30-50; the occluder's outline matches the real nose, ?ocv=1). Now the half of
 //    the nose turned away from the camera, below the bridge, is moved towards the camera along the line of sight: its outline
 //    in the picture stays exactly the same, but the far rim behind that outline is hidden. The near half stays where it was.
-//  - Far arm: v27 hid the arm on the side turned away from the camera as soon as the turn passed ~15° (it popped off) and never
-//    drew either arm behind a lens. On the real frame (Paul's laptop clip, yaw 10-30) the far arm shows through the far lens,
-//    against the background, up to where it goes behind the side of the face. Now both arms are always drawn, also behind the
-//    lenses, and the head hides them: the face occluder plus a skull (an ellipsoid inside the arms that fills the head behind
-//    the face, so the far arm cannot show through the gap behind the edge of the face mesh).
+//  - The face mesh has holes at the eyes and the mouth; through the far eye's hole the far arm showed inside the head on strong
+//    turns (yaw 60-75). They are closed (a fan of triangles over each opening).
+//  - Far arm: v27 hid the arm on the side turned away from the camera as soon as the turn passed ~15° (it popped off, a few px
+//    at the far corner). Now both arms are always drawn and the head hides them: the face occluder plus a skull (an ellipsoid
+//    inside the arms that fills the head behind the face, so the far arm cannot show through the gap behind the edge of the
+//    face mesh).
+//  - ?olm=0 (test): the arms are also drawn behind the lenses (v11 masked them out with the lens shapes). On the real frame
+//    the far arm does show through the far lens up to the edge of the face (laptop clip yaw 11-31 and -43, iPhone clip yaw
+//    +33..+49), and with olm=0 its extent matches there, but ours is ~2x as thick and lower, and on the iPhone clip at yaw
+//    -35..-45 it crosses the middle of the lens where the real one is not seen at all (our far arm runs lower than the real
+//    one: fit track). So the lens mask stays on by default.
 // ?ocv=1 (test only): draws the face occluder in translucent green, to compare its outline with the real nose and face.
 export function initOcc({ THREE, head, faceGeo, glasses, occMat, QS }) {
   const mode = +(QS.get('oc') ?? 0);
@@ -19,17 +25,27 @@ export function initOcc({ THREE, head, faceGeo, glasses, occMat, QS }) {
   let last = null, nose = [], midX = 0, noseC = [0, 0, 0], nearZ = 0, eyeY = 0;
   const SK = { in: +(QS.get('osi') ?? 3), front: +(QS.get('osf') ?? -30), back: +(QS.get('osb') ?? -185), top: +(QS.get('ost') ?? 95), bot: +(QS.get('osd') ?? -70) };
   const skull = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 28), occMat); skull.renderOrder = -2; skull.visible = false; head.add(skull);
-  if (mode) {
-    // arms drawn behind the lenses too (the lens shapes no longer mask them out; the head occluders hide what the head hides)
-    for (const t of Object.values(glasses.temples)) t.traverse(o => { if (o.isMesh) for (const m of [].concat(o.material)) if (m.stencilWrite && m.stencilFunc === THREE.NotEqualStencilFunc) m.stencilWrite = false; });
-  }
+  // arms drawn behind the lenses too (the lens shapes no longer mask them out; the head occluders hide what the head hides)
+  const armMats = new Set();
+  for (const t of Object.values(glasses.temples)) t.traverse(o => { if (o.isMesh) for (const m of [].concat(o.material)) if (m.stencilWrite && m.stencilFunc === THREE.NotEqualStencilFunc) armMats.add(m); });
+  const lensMask = on => { for (const m of armMats) m.stencilWrite = on; };
+  if (mode) lensMask(QS.get('olm') !== '0');
   if (QS.has('ocv')) {
     const m = new THREE.Mesh(faceGeo, new THREE.MeshBasicMaterial({ color: 0x00ff40, transparent: true, opacity: .28, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
     m.renderOrder = 20; m.frustumCulled = false; head.add(m);
   }
+  const HOLES = [[33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246],
+    [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466],
+    [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 415, 310, 311, 312, 13, 82, 81, 80, 191]];
+  let filled = false;
   // after setOccluders filled faceGeo: remember the nose vertices (base position without the NOSE_Z offset)
   function build(model, isNose, noseZ) {
     if (!mode) return;
+    if (!filled && faceGeo.index) {
+      const idx = Array.from(faceGeo.index.array);
+      for (const r of HOLES) for (let j = 1; j < r.length - 1; j++) idx.push(r[0], r[j], r[j + 1]);
+      faceGeo.setIndex(idx); filled = true;
+    }
     const p = faceGeo.attributes.position; midX = model[168][0]; nearZ = noseZ; nose = []; eyeY = (model[133][1] + model[362][1]) / 2;
     for (let i = 0; i < 468; i++) if (isNose[i]) nose.push({ i, x: p.getX(i), y: p.getY(i), z: p.getZ(i) - noseZ, ax: model[i][0] - midX });
     noseC = [model[4][0], model[4][1], model[4][2]];
@@ -64,6 +80,6 @@ export function initOcc({ THREE, head, faceGeo, glasses, occMat, QS }) {
     p.needsUpdate = true;
   }
   // test tools: change the parameters and redo the last frame (several variants from one tracking run)
-  const set = o => { Object.assign(P, o); for (const k in o) if (k in SK) SK[k] = o[k]; if (o.skull !== undefined) skull.visible = !!o.skull; if (last) frame(...last); };
+  const set = o => { Object.assign(P, o); for (const k in o) if (k in SK) SK[k] = o[k]; if (o.skull !== undefined) skull.visible = !!o.skull; if (o.lensMask !== undefined) lensMask(!!o.lensMask); if (last) frame(...last); };
   return { mode, build, frame, set, P };
 }
