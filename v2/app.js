@@ -38,7 +38,8 @@ function roomEnv(img, w, h) {
 // Glossy acetate looks glossy because it mirrors exactly those: dark everywhere, small bright highlights. With the clipped
 // image as the room, the frame mirrored a dull grey everywhere instead. The brightest parts are now expanded (x up to 1 + HDR
 // at white, from luminance HDR_KNEE up) into a half-float image, on the GPU. ?hdr=0: the old 8-bit room.
-const HDR = +(QS.get('hdr') ?? 10), HDR_KNEE = +(QS.get('hk') ?? .7);
+const HDR = renderer.capabilities.isWebGL2 && (renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float')) ? +(QS.get('hdr') ?? 10) : 0;
+const HDR_KNEE = +(QS.get('hk') ?? .7);
 let hdrPass = null;
 function hdrEnv() {   // expands the canvas image into a half-float target on the GPU (no per-pixel work in JavaScript)
   if (!hdrPass) {
@@ -408,12 +409,12 @@ function adaptLight(ctx) {
   const d = ctx.getImageData(W * .25 | 0, H * .2 | 0, W * .5 | 0, H * .5 | 0).data; let s = 0, n = 0;
   for (let i = 0; i < d.length; i += 400) { s += .3 * d[i] + .6 * d[i + 1] + .1 * d[i + 2]; n++; }
   const lum = s / n / 255; renderer.toneMappingExposure = Math.max(.75, Math.min(1.25, .7 + lum * .75));
-  // camera black level (v28): 1st percentile of the brightness, tinted like the whole picture (half strength, so brown hair or
-  // eyes do not turn the frame brown)
+  // camera black level (v28): 1st percentile of the brightness, tinted a little like the whole picture (4th root of its colour
+  // cast: the real frame in Paul's iPhone clip is almost neutral, rgb 57/54/53, in a warm picture, 149/140/128)
   const L = [], mean = [0, 0, 0];
   for (let i = 0; i < d.length; i += 400) { L.push(.3 * d[i] + .6 * d[i + 1] + .1 * d[i + 2]); mean[0] += d[i]; mean[1] += d[i + 1]; mean[2] += d[i + 2]; }
   L.sort((a, b) => a - b); const p1 = L[Math.floor(L.length * .01)] / 255, ml = (.3 * mean[0] + .6 * mean[1] + .1 * mean[2]) || 1;
-  const t = mean.map(c => Math.sqrt(c / ml)), k = Math.min(.22, p1 * LIFT);
+  const t = mean.map(c => (c / ml) ** .25), k = Math.min(.22, p1 * LIFT);
   look.target.set(k * t[0], k * t[1], k * t[2]);
   if (look.lift.lengthSq() === 0) look.lift.copy(look.target);
 }
@@ -505,6 +506,7 @@ function makePerf() {
         `ours/frame: ${Object.entries(P.steps).filter(([k]) => k !== 'light' && k !== 'env').map(([k, o]) => k + ' ' + f1(o.sum / o.n)).join('  ')} ms\n` +
         `every 30th: ${['light', 'env'].map(k => P.steps[k] ? k + ' ' + f1(P.steps[k].sum / P.steps[k].n) + ' (max ' + Math.round(P.steps[k].max) + ')' : '').join('  ')} ms\n` +
         `wasm SIMD ${SIMD ? 'yes' : 'NO'}  input ${P.input || 'camera'}  ${P.size}\n` +
+        `look: ${post ? `blur ${look.sig.toFixed(2)} px  black ${Math.round(look.lift.y * 255)}/255` : 'direct (post off)'}  room ${HDR ? 'HDR' : '8-bit'}\n` +
         `total: ${T.res} results · not tracked ${pct(T.camLost, T.cam + T.camLost)} · frozen ${T.frozen} · no glasses ${T.hidden} · gaps>50ms ${T.gap50} · worst ${Math.round(T.gapMax)} ms`;
       P.s = zero(); P.t = now;
     }
