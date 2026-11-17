@@ -149,23 +149,27 @@ function computeFit() {
   const armLen = Math.hypot(earR[0] - SPEC.hingeX, earR[1] - hy, hz - earR[2] + EAR_BACK);
   const ipd = v.len(v.sub(model[468], model[473]));
   const faceW = Math.abs(model[234][0] - model[454][0]);
-  return { midX, seat, seatZ, tilt, open, openL, openR, armDown, armLen, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact, earY: earR[1], earZ: earR[2] };
+  return { midX, seat, seatZ, tilt, open, openL, openR, armDown, armLen, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact, earX: earR[0], earY: earR[1], earZ: earR[2] };
 }
 
 const basePos = new THREE.Vector3();
 // downTilt: extra forward tilt of the front while the head looks down at the camera (set per frame by poseFit, degrees)
 let downTilt = 0;
 // Places the front and the arms. The front turns about the nose pads; `extra` (degrees) is added to the fitted tilt, and the
-// arms are re-aimed from the moved hinge at the same ear point, so their ear ends stay where the fit put them.
+// arms are re-aimed from the moved hinge at the same ear point, so their ear ends stay where the fit put them. DOWN_LEN (dl):
+// the arm's length to the ear is also re-measured from the moved hinge (the hinge comes up to ~8 mm forward; without this the arm
+// faded out that much short of the ear).
+let armLenNow = 0;
 function placeFit(extra = 0) {
   const r = glasses.root, place = tilt => { r.rotation.set(tilt, 0, 0);
     const pad = new THREE.Vector3(0, SPEC.padY, SPEC.padZ).applyEuler(r.rotation);
     r.position.set(fit.midX - pad.x, fit.seat.y + nudge - pad.y, fit.seatZ - pad.z);
     const h = new THREE.Vector3(0, SPEC.hingeY, SPEC.hingeZ).applyEuler(r.rotation).add(r.position);
-    return Math.atan2(h.y - fit.earY, h.z - fit.earZ); };
-  let armDown = fit.armDown, tilt = fit.tilt;
-  if (extra) { const a0 = place(tilt); tilt += extra / 57.3; armDown += place(tilt) - a0; } else place(tilt);
-  basePos.copy(r.position);
+    return [Math.atan2(h.y - fit.earY, h.z - fit.earZ), Math.hypot(fit.earX - SPEC.hingeX, h.y - fit.earY, h.z - fit.earZ + EAR_BACK)]; };
+  let armDown = fit.armDown, tilt = fit.tilt, armLen = fit.armLen;
+  if (extra) { const [a0, l0] = place(tilt); tilt += extra / 57.3; const [a1, l1] = place(tilt); armDown += a1 - a0; if (DOWN_LEN) armLen += l1 - l0; }
+  else place(tilt);
+  basePos.copy(r.position); armLenNow = armLen;
   // opening outwards: the left arm (x < 0) turns towards -x, the right towards +x (v14 and before had this reversed:
   // the arms ran into the head and were hidden by the cheek)
   const aL = Math.max(-.05, Math.min(.2, fit.openL ?? fit.open)), aR = Math.max(-.05, Math.min(.2, fit.openR ?? fit.open));
@@ -174,7 +178,7 @@ function placeFit(extra = 0) {
 function applyFit() {
   if (!fit) return;
   placeFit(downTilt);
-  if (glasses.setArmEnd) glasses.setArmEnd(fit.armLen);
+  if (glasses.setArmEnd) glasses.setArmEnd(armLenNow);
 }
 // Looking down at the camera, Paul's real front is much flatter than a front that keeps its fitted tilt: on the laptop clip
 // of 9 Nov (frames 656-680) its bottom rim matched, but its top bar and hinges were 7-10 mm lower in the picture, while the
@@ -187,7 +191,7 @@ function poseFit(p) {
   const c = v.mul(p.t, -1 / v.len(p.t)), ch = q.rot(q.conj(p.R), c);        // direction to the camera, in head coordinates
   const el = Math.asin(Math.max(-1, Math.min(1, ch[1]))) * 57.3, turn = Math.atan2(Math.abs(ch[0]), ch[2]) * 57.3;
   const d = Math.max(0, Math.min(DOWN_MAX, DOWN_GAIN * (el - DOWN_KNEE))) * Math.max(0, Math.min(1, (DOWN_TURN - turn) / 20));
-  if (Math.abs(d - downTilt) > .02) { downTilt = d; placeFit(d); }
+  if (Math.abs(d - downTilt) > .02) { downTilt = d; placeFit(d); if (glasses.setArmEnd) glasses.setArmEnd(armLenNow); }
 }
 
 function renderFitCard() {
@@ -217,7 +221,7 @@ const ANCHOR = [168, 6];
 const DEBUG_NOOCC = QS.get('occ') === '0';   // test only: draw the arms without anything hiding them
 const NOSE_Z = +(QS.get('nz') ?? -2.5), SIDE_K = +(QS.get('sk') ?? 0), ARM_MIN = +(QS.get('amin') ?? -8), EAR_BACK = +(QS.get('eb') ?? 8), EAR_Y = +(QS.get('ey') ?? SPEC.earY ?? 10), RIGID_REL = +(QS.get('rig') ?? SPEC.armAngle ?? 0);
 const PARALLAX = +(QS.get('px') ?? 6), TILT_X = +(QS.get('tx') ?? 12);
-const DOWN_KNEE = +(QS.get('dk') ?? 2), DOWN_GAIN = +(QS.get('dg') ?? 1), DOWN_MAX = +(QS.get('dm') ?? 26), DOWN_TURN = +(QS.get('dt') ?? 50);
+const DOWN_KNEE = +(QS.get('dk') ?? 2), DOWN_GAIN = +(QS.get('dg') ?? 1), DOWN_MAX = +(QS.get('dm') ?? 26), DOWN_TURN = +(QS.get('dt') ?? 50), DOWN_LEN = +(QS.get('dl') ?? 1);
 const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
 // test only (off by default): extra look-down pitch below PITCH_KNEE, as v21 tried (pivots at the bridge anchor, so it also lifts the ears)
 const PITCH_KNEE = +(QS.get('pk') ?? 3), PITCH_GAIN = +(QS.get('pg') ?? 0);

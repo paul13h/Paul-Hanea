@@ -154,7 +154,9 @@ function setArmEnd(temples, tees, ear) {
     const t = pivot.children[0], u = t.userData, side = u.side;
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(pivot.quaternion);          // the arm's direction, front coordinates
     const zf = wrapZ(70.4) + .2, L = zf - SPEC.hingeZ;                                   // front face to hinge seam
-    const rel = Math.atan2(-dir.y, -dir.z), open = Math.abs(Math.atan2(dir.x, -dir.z));
+    // rel is rounded to 0.01 rad (0.6°): looking down, the fit changes the arm/front angle every frame (app.js poseFit), and the
+    // arm is only rebuilt when the rounded angle changes
+    const rel = Math.round(Math.atan2(-dir.y, -dir.z) / .01) * .01, open = Math.abs(Math.atan2(dir.x, -dir.z));
     const f = { side, L, open, rel }, key = [rel, open].map(x => x.toFixed(3)).join();
     if (key !== u.key) {
       const geo = buildArm(f); u.arm.geometry.dispose(); u.line.geometry.dispose();
