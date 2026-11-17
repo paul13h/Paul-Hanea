@@ -137,6 +137,10 @@ function makePost() {
     transparent: true, depthTest: false, depthWrite: false });
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); quad.frustumCulled = false;
   const qs = new THREE.Scene(); qs.add(quad);
+  // safety net: if this browser cannot make a multisampled float buffer, keep the old direct drawing instead of no glasses
+  try { renderer.setRenderTarget(rt); renderer.clear(); const st = gl.checkFramebufferStatus(gl.FRAMEBUFFER); renderer.setRenderTarget(null);
+    if (st !== gl.FRAMEBUFFER_COMPLETE) { rt.dispose(); return null; } }
+  catch (e) { renderer.setRenderTarget(null); rt.dispose(); return null; }
   return { rt, mat, qs, qc: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1) };
 }
 // every mesh keeps layer 0 (the old direct drawing); the frame goes on L_RT, shadow and lenses on L_DIRECT, the invisible
