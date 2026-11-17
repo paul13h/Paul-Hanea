@@ -214,7 +214,7 @@ let pose = null, W = 0, H = 0, lastT = 0, seen = 0, found = 0;
 // ~45% less on fast moves (p90 5.1 -> 2.8 px at the ear), while at rest they move 0.38 instead of 0.31 px per frame
 const ROT_F = (QS.get('rf') ?? '2,10').split(',').map(Number);
 const rotF = new QuatFilter(ROT_F[0], ROT_F[1]), zF = new OneEuro(.8, .012), axF = new OneEuro(3, .5), ayF = new OneEuro(3, .5);
-const ANCHOR = [168, 6];
+const ANCHOR = [168, 6], ANCHOR_PNP = +(QS.get('ap') ?? 0);
 // Both checked frame by frame against Paul's real Tom Ford (ghost=1 over his video, looking up, down and to the sides):
 // TILT_X: the real front leans forward more than the fitted tilt (seen from below it looks taller, from above flatter).
 // PARALLAX: in turned views the real front sits further towards the nose than the tracked bridge point suggests.
@@ -250,7 +250,11 @@ function track(lms, w, h, tMs) {
   // Anchor: tied to the nose bridge and inner eye corners, so the frame cannot slide on the face
   let ax = 0, ay = 0, am = [0, 0, 0];
   for (const i of ANCHOR) { ax += pts[i][0]; ay += pts[i][1]; am = v.add(am, model[i]); }
-  const n = ANCHOR.length; ax = axF.filter(ax / n, dt); ay = ayF.filter(ay / n, dt); am = v.mul(am, 1 / n);
+  const n = ANCHOR.length; ax /= n; ay /= n; am = v.mul(am, 1 / n);
+  // ANCHOR_PNP (test, ?ap=0..1): take the bridge point from the whole-face pose instead of the two bridge landmarks alone
+  if (ANCHOR_PNP) { const r0 = v.add(q.rot(pose.R, am), pose.t), px = cam.cx + cam.f * r0[0] / -r0[2], py = cam.cy + cam.f * r0[1] / r0[2];
+    ax += ANCHOR_PNP * (px - ax); ay += ANCHOR_PNP * (py - ay); }
+  ax = axF.filter(ax, dt); ay = ayF.filter(ay, dt);
   const r = q.rot(Rs, am), Z = r[2] + z;
   const X = (ax - cam.cx) * -Z / cam.f, Y = (ay - cam.cy) * Z / cam.f;
   const t = [X - r[0], Y - r[1], z];
