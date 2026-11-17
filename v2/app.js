@@ -31,25 +31,30 @@ function roomEnv(img, w, h) {
   envX.fillStyle = 'rgba(255,255,255,.95)'; envX.fillRect(118, 6, 20, 14);   // a soft ceiling light for highlights on metal and gloss
   envX.filter = 'blur(3px)'; envX.fillStyle = 'rgba(255,255,255,.75)'; envX.fillRect(150, 22, 44, 30); envX.fillRect(52, 26, 30, 24); envX.filter = 'none';   // windows / bright walls
   const t = HDR ? hdrEnv() : new THREE.CanvasTexture(envC); t.mapping = THREE.EquirectangularReflectionMapping; if (!HDR) t.colorSpace = THREE.SRGBColorSpace;
-  const rt = pmrem.fromEquirectangular(t); t.dispose();
+  const rt = pmrem.fromEquirectangular(t); if (!HDR) t.dispose();
   if (envRT) envRT.dispose(); envRT = rt; scene.environment = rt.texture;
 }
 // v28 (polish): the camera image tops out at white, but the lamps and windows it shows are many times brighter than the walls.
 // Glossy acetate looks glossy because it mirrors exactly those: dark everywhere, small bright highlights. With the clipped
 // image as the room, the frame mirrored a dull grey everywhere instead. The brightest parts are now expanded (x up to 1 + HDR
-// at white, from luminance HDR_KNEE up), as a half-float image. ?hdr=0: the old 8-bit room.
+// at white, from luminance HDR_KNEE up) into a half-float image, on the GPU. ?hdr=0: the old 8-bit room.
 const HDR = +(QS.get('hdr') ?? 10), HDR_KNEE = +(QS.get('hk') ?? .7);
-const envPx = new Uint16Array(256 * 128 * 4), S2L = Float32Array.from({ length: 256 }, (_, i) => { const c = i / 255; return c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4; });
-const H1 = THREE.DataUtils.toHalfFloat(1);
-function hdrEnv() {
-  const d = envX.getImageData(0, 0, 256, 128).data, half = THREE.DataUtils.toHalfFloat;
-  for (let y = 0; y < 128; y++) for (let x = 0; x < 256; x++) {
-    const i = (y * 256 + x) * 4, o = ((127 - y) * 256 + x) * 4, r = S2L[d[i]], g = S2L[d[i + 1]], b = S2L[d[i + 2]];
-    const l = .2126 * r + .7152 * g + .0722 * b, k = Math.max(0, (l - HDR_KNEE) / (1 - HDR_KNEE)), m = 1 + HDR * k * k;
-    envPx[o] = half(r * m); envPx[o + 1] = half(g * m); envPx[o + 2] = half(b * m); envPx[o + 3] = H1;
+let hdrPass = null;
+function hdrEnv() {   // expands the canvas image into a half-float target on the GPU (no per-pixel work in JavaScript)
+  if (!hdrPass) {
+    const tex = new THREE.CanvasTexture(envC); tex.colorSpace = THREE.SRGBColorSpace;
+    const rt = new THREE.WebGLRenderTarget(256, 128, { type: THREE.HalfFloatType, depthBuffer: false });
+    const mat = new THREE.ShaderMaterial({ uniforms: { t: { value: tex }, hk: { value: HDR_KNEE }, hdr: { value: HDR } }, depthTest: false, depthWrite: false, toneMapped: false,
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+      fragmentShader: `uniform sampler2D t; uniform float hk, hdr; varying vec2 vUv;
+        void main() { vec3 c = texture2D(t, vUv).rgb; float l = dot(c, vec3(.2126, .7152, .0722)), k = max(0., (l - hk) / (1. - hk));
+          gl_FragColor = vec4(c * (1. + hdr * k * k), 1.); }` });
+    const q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); q.frustumCulled = false; const sc = new THREE.Scene(); sc.add(q);
+    hdrPass = { tex, rt, sc, cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1) };
   }
-  const t = new THREE.DataTexture(envPx, 256, 128, THREE.RGBAFormat, THREE.HalfFloatType);
-  t.magFilter = t.minFilter = THREE.LinearFilter; t.colorSpace = THREE.LinearSRGBColorSpace; t.needsUpdate = true; return t;
+  hdrPass.tex.needsUpdate = true;
+  const prev = renderer.getRenderTarget(); renderer.setRenderTarget(hdrPass.rt); renderer.render(hdrPass.sc, hdrPass.cam); renderer.setRenderTarget(prev);
+  return hdrPass.rt.texture;
 }
 const bg = document.createElement('canvas'), bgCtx = bg.getContext('2d', { alpha: false });
 const bgTex = new THREE.CanvasTexture(bg); bgTex.colorSpace = THREE.SRGBColorSpace; scene.background = bgTex;
@@ -107,7 +112,7 @@ const POST_ON = !QS.has('ghost') && QS.get('post') !== '0';
 // soft: multiplier on the measured camera blur (?soft=0 sharp); softpx=N fixes it at N px instead of measuring
 const SOFT = +(QS.get('soft') ?? 1), SOFT_PX = QS.has('softpx') ? +QS.get('softpx') : null, LIFT = +(QS.get('lift') ?? .85), GRAIN = +(QS.get('grain') ?? 1.5);
 const L_RT = 1, L_DIRECT = 2, BOX_ON = QS.get('box') !== '0';
-const look = { lift: new THREE.Vector3(), target: new THREE.Vector3(), seed: 0, sig: SOFT_PX ?? 1, sigs: [] };
+const look = { lift: new THREE.Vector3(), target: new THREE.Vector3(), seed: 0, sig: SOFT_PX ?? 1, sigs: [], skip: 0 };
 let post = null;
 function makePost() {
   const gl = renderer.getContext(), ok = renderer.capabilities.isWebGL2 && (renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float'));
@@ -147,27 +152,26 @@ function assignLayers() {
 // read 0.8-1.1 px on Paul's laptop and iPhone clips (960x640). The frame then gets that blur minus its own (~0.4 px, multisampled).
 function measureSoft(ctx, pts) {
   if (SOFT_PX !== null || !SOFT) return;
+  if (look.sigs.length >= 5 && ++look.skip % 10) return;   // settled: every 10th time (~10 s)
   const a = pts[33], b = pts[263], x0 = Math.max(0, Math.min(a[0], b[0]) - 30 | 0), x1 = Math.min(W, Math.max(a[0], b[0]) + 30 | 0);
   const y0 = Math.max(0, Math.min(a[1], b[1]) - 40 | 0), y1 = Math.min(H, Math.max(a[1], b[1]) + 30 | 0), w = x1 - x0, h = y1 - y0;
   if (w < 60 || h < 30 || w * h > 400000) return;
-  const d = ctx.getImageData(x0, y0, w, h).data, L = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) L[i] = .3 * d[i * 4] + .6 * d[i * 4 + 1] + .1 * d[i * 4 + 2];
-  const R = 3, mx = new Float32Array(w * h), mn = new Float32Array(w * h), MX = new Float32Array(w * h), MN = new Float32Array(w * h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let hi = -1, lo = 1e9; for (let k = Math.max(0, x - R); k <= Math.min(w - 1, x + R); k++) { const v = L[y * w + k]; if (v > hi) hi = v; if (v < lo) lo = v; } mx[y * w + x] = hi; mn[y * w + x] = lo; }
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let hi = -1, lo = 1e9; for (let k = Math.max(0, y - R); k <= Math.min(h - 1, y + R); k++) { const i = k * w + x; if (mx[i] > hi) hi = mx[i]; if (mn[i] < lo) lo = mn[i]; } MX[y * w + x] = hi; MN[y * w + x] = lo; }
-  const C = [], S = [];
-  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; C.push(MX[i] - MN[i]); }
-  const cs = C.slice().sort((p, q) => p - q), thr = cs[Math.floor(cs.length * .97)];
+  const d = ctx.getImageData(x0, y0, w, h).data, N = w * h, L = new Float32Array(N), mx = new Float32Array(N), mn = new Float32Array(N), C = new Uint8Array(N);
+  for (let i = 0; i < N; i++) L[i] = .3 * d[i * 4] + .6 * d[i * 4 + 1] + .1 * d[i * 4 + 2];
+  const R = 3;   // local contrast = max - min over 7 x 7 pixels (separable)
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let hi = -1, lo = 1e9; const e = Math.min(w - 1, x + R); for (let k = Math.max(0, x - R); k <= e; k++) { const v = L[y * w + k]; if (v > hi) hi = v; if (v < lo) lo = v; } mx[y * w + x] = hi; mn[y * w + x] = lo; }
+  const hist = new Uint32Array(256);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let hi = -1, lo = 1e9; const e = Math.min(h - 1, y + R); for (let k = Math.max(0, y - R); k <= e; k++) { const i = k * w + x; if (mx[i] > hi) hi = mx[i]; if (mn[i] < lo) lo = mn[i]; } const c = Math.min(255, hi - lo | 0); C[y * w + x] = c; hist[c]++; }
+  let thr = 255; for (let acc = 0; thr > 0 && (acc += hist[thr]) < N * .03; thr--);
   if (thr < 20) return;   // too flat (dark room, eyes closed): keep the last value
-  let n = 0;
-  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x, c = C[n++]; if (c < thr) continue;
-    const g = Math.hypot(L[i + 1] - L[i - 1], L[i + w] - L[i - w]) / 2; S.push(c / (g * 2.5066 + 1e-6)); }
+  const S = [];
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; if (C[i] < thr) continue;
+    const g = Math.hypot(L[i + 1] - L[i - 1], L[i + w] - L[i - w]) / 2; S.push(C[i] / (g * 2.5066 + 1e-6)); }
+  if (S.length < 20) return;
   S.sort((p, q) => p - q); const e = S[Math.floor(S.length * .1)], cam = Math.sqrt(Math.max(0, e * e - .36));
   look.sigs.push(Math.sqrt(Math.max(0, cam * cam - .16))); if (look.sigs.length > 5) look.sigs.shift();
   look.sig = Math.min(3, median(look.sigs));
 }
-// The frame's own buffer is only cleared, drawn, resolved and laid over the picture inside the glasses' box on screen (front and
-// arms, plus room for the blur): on Paul's laptop view that is ~10-25% of the picture.
 const clearC = new THREE.Color(), BOX = [], bv = new THREE.Vector3();
 for (const x of [-78, 78]) for (const y of [-34, 34]) for (const z of [14, -150]) BOX.push([x, y, z]);
 function screenBox() {
@@ -573,3 +577,4 @@ buildTris(); setOccluders(); fit = computeFit(); applyFit();
 if (POST_ON) { post = makePost(); assignLayers(); }
 if (!QS.has('nopre')) ensureMesh().catch(e => console.error(e));   // preload while the start page is shown
 window.__tryon = { onResults, scan, glasses, camera, head, THREE, beginScan, finishScan, get model() { return model; }, get fit() { return fit; }, cam, yawOf, render: draw, resize, stats: () => ({ scanned }), perf, look };
+if (QS.has("bench")) window.__tryon.bench = () => { const t = f => { const a = performance.now(); for (let i = 0; i < 20; i++) f(); return +((performance.now() - a) / 20).toFixed(2); }; const p = window.__tryon.pose.pts; return { light: t(() => adaptLight(bgCtx)), soft: t(() => { look.sigs.length = 0; measureSoft(bgCtx, p); }), env: t(() => roomEnv(bg, W, H)) }; };
