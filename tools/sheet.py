@@ -12,7 +12,7 @@ GROUPS = [  # (clip, [(frame, kind)])
  ('kmix', [(403,'straight'),(428,'straight'),(464,'turned L -35'),(486,'arm -48'),(495,'arm -48'),(576,'turned R +29'),(584,'turned R +31'),
            (592,'arm +55'),(664,'down'),(668,'down'),(672,'down -14'),(712,'up'),(720,'up +35'),(784,'arm -43'),(840,'turn R +31')])]
 T = 360; H = int(T * .6); N = 1 + len(names)
-cells = []
+cells = []; skipped = []
 for clip, lst in GROUPS:
     recs = [{r['i']: r for r in json.load(open(f'{D}/runs/{n}/{clip}.json'))['rec']} for n in names]
     for i, kind in lst:
@@ -30,7 +30,8 @@ for clip, lst in GROUPS:
         row = []
         for d in [clip] + [f'runs/{n}/{clip}' for n in names]:
             try: im = ImageOps.mirror(Image.open(f'{D}/{d}/{i:04d}.jpg').convert('RGB'))
-            except FileNotFoundError: row.append(Image.new('RGB', (T, H))); continue
+            except Exception:
+                miss = Image.new('RGB', (T, H), (60, 0, 0)); ImageDraw.Draw(miss).text((6, 20), 'missing/unreadable', fill=(255, 120, 120)); row.append(miss); skipped.append(f'{clip} {i} ({d})'); continue
             sc = im.width / 960; cx = (960 - c[0] + dx) * sc; cy = (c[1] + (25 if arm else 0)) * sc
             hw, hh = h * sc, .6 * h * sc
             cx = min(max(cx, hw), im.width - hw); cy = min(max(cy, hh), im.height - hh)   # clamp the box inside the image
@@ -45,3 +46,4 @@ for n, row in enumerate(cells):
     x = (n % per) * N * T; y = 18 + (n // per) * H
     for k, t in enumerate(row): S.paste(t, (x + k * T, y))
 S.save(out, quality=88)
+if skipped: print('SHEET: skipped cells (missing/unreadable):', ', '.join(skipped))

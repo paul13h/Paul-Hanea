@@ -5,16 +5,16 @@
 #   tools/check.sh --compare RUN_A RUN_B                                     no rendering: reuse two earlier runs (names under $TRYON_DATA/runs)
 #   --only imix,fl,kmix   clips to render (default all three)   --nobottom  skip the bottom-edge measurement (renders fewer frames)
 # Also prints a numeric summary: bottom-rim edge ghost-minus-real in mm per pitch bin (tools/bottom.py, straight-on frames only)
-# and writes ruler crops (tools/ruler.py) of kmix 428/668 etc. Ports 8980-8999.
+# and writes ruler crops (tools/ruler.py) of kmix 428/668 etc. Ports PB..PB+8, PB = --port or $CHECK_PORT (default 8840): A uses PB..PB+2, B PB+3..PB+5, dumps PB+6..PB+8.
 # Data (frames, landmark dumps, runs, sheets) lives outside the repo in $TRYON_DATA
 # (default ~/Documents/Virtual Try-On/tryon-data). Frames and dumps are cached; reruns only re-render.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(dirname "$HERE")"; QUERY=""; NAME=""; ROOT2=""; QUERY2=""; NAME2=""; CA=""; CB=""; CLIPS="imix,fl,kmix"; BOTTOM=1
+ROOT="$(dirname "$HERE")"; QUERY=""; NAME=""; ROOT2=""; QUERY2=""; NAME2=""; CA=""; CB=""; CLIPS="imix,fl,kmix"; BOTTOM=1; PB="${CHECK_PORT:-8840}"
 while [ $# -gt 0 ]; do case "$1" in
   --root) ROOT="$(cd "$2" && pwd)"; shift 2;; --query) QUERY="$2"; shift 2;; --name) NAME="$2"; shift 2;;
   --root2) ROOT2="$(cd "$2" && pwd)"; shift 2;; --query2) QUERY2="$2"; shift 2;; --name2) NAME2="$2"; shift 2;;
-  --compare) CA="$2"; CB="$3"; shift 3;; --only) CLIPS="$2"; shift 2;; --nobottom) BOTTOM=0; shift;;
+  --compare) CA="$2"; CB="$3"; shift 3;; --only) CLIPS="$2"; shift 2;; --port) PB="$2"; shift 2;; --nobottom) BOTTOM=0; shift;;
   *) echo "unknown option $1"; exit 1;; esac; done
 DATA="${TRYON_DATA:-$HOME/Documents/Virtual Try-On/tryon-data}"
 mkdir -p "$DATA/sheets" "$DATA/runs"
@@ -25,6 +25,11 @@ prep() {
   local FL="$HOME/Documents/Movie on 07-11-2026 at 17.10.mov"
   local K0="$HOME/Downloads/Movie on 09-11-2026 at 14.03.mov" K1="$HOME/Downloads/Movie on 09-11-2026 at 13.59.mov"
   local VF='crop=720:720:0:280,pad=1080:720:180:0,scale=960:640'   # imix = IMG_1402 frames 0..261, then IMG_1405 from 262
+  # iCloud may evict frames from ~/Documents (reading them then blocks); re-extract any clip with evicted frames from its video
+  ev() { [ "$(python3 "$HERE/frames.py" "$DATA/$1")" != 0 ]; }
+  ev imix && { echo "imix frames evicted by iCloud, re-extracting"; rm -f "$DATA/imix/0789.jpg"; }
+  ev fl && { echo "fl frames evicted by iCloud, re-extracting"; rm -f "$DATA/fl/0600.jpg"; }
+  ev kmix && { echo "kmix frames evicted by iCloud, re-extracting"; rm -f "$DATA/kmix/0869.jpg"; }
   if [ ! -f "$DATA/imix/0789.jpg" ]; then
     echo "extracting imix frames"; mkdir -p "$DATA/imix"
     ffmpeg -v error -y -i "$A" -vf "$VF" -frames:v 262 -start_number 0 -q:v 3 "$DATA/imix/%04d.jpg"
@@ -39,7 +44,7 @@ prep() {
     ffmpeg -v error -y -i "$K0" -vf scale=960:640 -start_number 0 -q:v 3 "$DATA/kmix/%04d.jpg"
     ffmpeg -v error -y -i "$K1" -vf scale=960:640 -start_number 394 -q:v 3 "$DATA/kmix/%04d.jpg"
   fi
-  local c p=8970
+  local c p=$((PB+5))
   for c in imix fl kmix; do p=$((p+1)); has $c || continue
     [ -f "$DATA/L_$c.json" ] || { echo "FaceMesh dump $c"; python3 "$HERE/dump_l.py" "$DATA" $c $p; }
   done
@@ -81,8 +86,8 @@ nm() { echo "$(git -C "$1" rev-parse --abbrev-ref HEAD | tr '/' '_')-$(git -C "$
 [ "$NAME" != "$NAME2" ] || NAME2="$NAME2-b"
 T0=$(date +%s); PIDS=""
 prep
-render "$NAME" "$ROOT" "$QUERY" 8980
-[ -z "$ROOT2" ] || render "$NAME2" "$ROOT2" "$QUERY2" 8985
+render "$NAME" "$ROOT" "$QUERY" $PB
+[ -z "$ROOT2" ] || render "$NAME2" "$ROOT2" "$QUERY2" $((PB+3))
 for p in $PIDS; do wait $p || { tail -5 "$DATA/runs/$NAME/"*.log; exit 1; }; done
 tail -qn1 "$DATA/runs/$NAME/"*.log | cut -c1-200
 if [ -n "$ROOT2" ]; then

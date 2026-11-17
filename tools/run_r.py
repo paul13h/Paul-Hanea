@@ -3,10 +3,13 @@
 #   python3 tools/run_r.py <dir> <clip> <out> [scan|noscan] "<query>" <port> [every]
 # Writes <dir>/<out>/NNNN.jpg for every `every`-th frame (default 1) and <dir>/<out>.json.
 import subprocess,time,sys,json,base64,os
+sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
+import frames as FR
 from playwright.sync_api import sync_playwright
 S,clip,out=sys.argv[1],sys.argv[2],sys.argv[3]; scan=sys.argv[4]=='scan'; every=int(sys.argv[7]) if len(sys.argv)>7 else 1
 os.makedirs(f'{S}/{out}',exist_ok=True)
-frames=sorted(os.listdir(f'{S}/{clip}')); L=json.load(open(f'{S}/L_{clip}.json'))
+frames=sorted(f for f in os.listdir(f'{S}/{clip}') if f.endswith('.jpg')); L=json.load(open(f'{S}/L_{clip}.json'))
+bad,sub=FR.scan(f'{S}/{clip}',frames); BAD=set(bad)  # unreadable frames: fed as the nearest good image with no face, never saved
 root=os.environ.get('ROOT') or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ONLY=set(int(x) for x in os.environ['ONLY'].split(',') if x) if os.environ.get('ONLY') else None  # save only these frames (tracking still runs on all)
 srv=subprocess.Popen([sys.executable,'-m','http.server',sys.argv[6]],cwd=root,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); time.sleep(1)
@@ -38,13 +41,13 @@ try:
     b=p.chromium.launch(args=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist'])
     pg=b.new_page(viewport={'width':1100,'height':1100})
     errs=[]; pg.on('pageerror',lambda e:errs.append(str(e)))
-    pg.route('**/__f/*',lambda r:r.fulfill(path=f'{S}/{clip}/'+frames[int(r.request.url.rsplit('/',1)[1])]))
+    pg.route('**/__f/*',lambda r:r.fulfill(path=f'{S}/{clip}/'+frames[sub[int(r.request.url.rsplit('/',1)[1])]]))
     pg.goto('http://localhost:'+sys.argv[6]+'/v2/tf.html?capture=1&'+sys.argv[5]); SC=float(os.environ.get('SCALE','1')); pg.evaluate(f'window.W={int(960*SC)};window.H={int(640*SC)}'); pg.wait_for_function('window.__tryon',timeout=30000)
     pg.evaluate("import('/v2/solver.js').then(m=>window.__S=m)"); time.sleep(.5)
     pg.evaluate(INIT,scan)
     rec=[]; t0=time.time()
     for i in range(len(frames)):
-      o=pg.evaluate(STEP,[i,L[i],(i in ONLY if ONLY is not None else i%every==0 and i>=int(os.environ.get('FROM','0')))])
+      o=pg.evaluate(STEP,[i,None if i in BAD else L[i],(False if i in BAD else i in ONLY if ONLY is not None else i%every==0 and i>=int(os.environ.get('FROM','0')))])
       if 'jpg' in o: open(f'{S}/{out}/{i:04d}.jpg','wb').write(base64.b64decode(o.pop('jpg').split(',')[1]))
       rec.append(o)
     fit=pg.evaluate('''(()=>{const T=window.__tryon,f=T.fit,G=T.glasses,V=T.THREE.Vector3;
@@ -54,7 +57,7 @@ try:
         out.armR=[hp(0),hp(-60),hp(-116),hp(-141)];}
       const m=T.model; out.lm={}; for (const k of [10,152,168,6,1,33,133,362,263,127,356,234,454,93,323,162,389,21,251,468,473]) out.lm[k]=m[k].map(x=>+x.toFixed(1));
       return out})()''')
-    json.dump({'rec':rec,'fit':fit,'scanned':pg.evaluate('window.__tryon.stats().scanned')},open(f'{S}/{out}.json','w'))
+    json.dump({'bad':bad,'rec':rec,'fit':fit,'scanned':pg.evaluate('window.__tryon.stats().scanned')},open(f'{S}/{out}.json','w'))
     print('frames',len(rec),'sec',round(time.time()-t0),'errors',errs[:3],'fit',fit)
     b.close()
 finally: srv.terminate()

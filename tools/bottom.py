@@ -25,13 +25,14 @@ def edge_red(m, y0):
     k = idx[0] + y0
     while k < len(m) - 1 and m[k]: k += 1
     return k
-res = {}
+res = {}; skipped = []
 for run in runs:
     rec = {r['i']: r for r in json.load(open(f'{D}/{run}.json'))['rec']}; rows = []
     for i in sorted(rec):
         r = rec[i]; p = f'{D}/{run}/{i:04d}.jpg'
         if i < int(os.environ.get('START', 262)) or i > int(os.environ.get('END', 10**6)) or not r.get('lens') or not os.path.exists(p) or abs(r['yaw']) > 12: continue
-        a = np.asarray(Image.open(p).convert('RGB')).astype(int); b = np.asarray(Image.open(f'{D}/{clip}/{i:04d}.jpg').convert('RGB')).astype(int)
+        try: a = np.asarray(Image.open(p).convert('RGB')).astype(int); b = np.asarray(Image.open(f'{D}/{clip}/{i:04d}.jpg').convert('RGB')).astype(int)
+        except Exception: skipped.append(i); continue
         (lx, ly), (rx, ry) = r['lens']; sep = np.hypot(rx - lx, ry - ly); px = sep / 71; d = []
         for cx, cy in ((lx, ly), (rx, ry)):
             x0, x1, ya, yb = int(cx - 6), int(cx + 6), int(cy + 0.5 * px), int(cy + 30 * px)
@@ -49,4 +50,5 @@ for run in runs:
     for lo, hi in [(-30, -8), (-8, 0), (0, 8), (8, 16), (16, 30), (30, 60)]:
         s = [v for _, p, v in rows if lo <= p < hi]
         if s: print(f'   pitch {lo:+3d}..{hi:+3d}: n {len(s):3d}  median {np.median(s):+.1f}  IQR {np.percentile(s, 25):+.1f}..{np.percentile(s, 75):+.1f}')
+if skipped: print('bottom.py: skipped unreadable frames:', sorted(set(skipped)))
 json.dump({k: {str(i): v for i, v in d.items()} for k, d in res.items()}, open(os.environ.get('OUTJSON', f'{D}/bottom_last.json'), 'w'))
