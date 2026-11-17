@@ -38,6 +38,90 @@ function smooth(g, creaseDeg = 38) {
   }
   g.setAttribute('normal', new THREE.BufferAttribute(out, 3)); return g;
 }
+// v28 (polish): the front's faces are flat triangles between outline points, often 10-20 mm long. bend() moves only their corners,
+// so where the front turns back steeply at the corners (5 mm over the last 5 mm) a long triangle stayed one flat facet: the
+// faceted, differently shining patch on top of the corner block, and a crease along the top bar. Split every edge longer than
+// `maxLen` (2.5 mm within 3 mm of the corners) before bending, so the surface follows the curve. The rule depends on the edge only,
+// so both triangles that share an edge split it the same way and no cracks open. Shape and outline are unchanged. 72k -> 93k
+// triangles (0.8 mm near the corners gave 130k and looked the same). ?tess=0 turns it off, ?tess=8,2.5 sets the lengths.
+const TESS = (new URLSearchParams(location.search).get('tess') ?? '8,2.5').split(',').map(Number), CAP_N = new URLSearchParams(location.search).get('cn') !== '0';
+function tessellate(g, maxLen = TESS[0], cornerLen = TESS[1], cornerX = CORNER_X - 3) {
+  if (!maxLen) return g;
+  if (g.index) g = g.toNonIndexed();
+  const names = Object.keys(g.attributes).filter(n => n !== 'normal'), A = names.map(n => g.attributes[n]);
+  let tris = []; const P = g.attributes.position;
+  for (let i = 0; i < P.count; i += 3) tris.push([i, i + 1, i + 2].map(k => A.map(a => Array.from({ length: a.itemSize }, (_, c) => a.array[k * a.itemSize + c]))));
+  const limit = (p, q) => (Math.max(Math.abs(p[0][0]), Math.abs(q[0][0])) > cornerX ? cornerLen : maxLen);
+  const long = (p, q) => Math.hypot(p[0][0] - q[0][0], p[0][1] - q[0][1]) > limit(p, q);   // in x-y only: bend() does not depend on z
+  const mid = (p, q) => { const [a, b] = p[0][0] < q[0][0] || (p[0][0] === q[0][0] && p[0][1] <= q[0][1]) ? [p, q] : [q, p]; return a.map((at, j) => at.map((x, c) => (x + b[j][c]) / 2)); };
+  for (let pass = 0; pass < 6; pass++) {
+    let split = false; const out = [];
+    for (const [a, b, c] of tris) {
+      const s = [long(a, b), long(b, c), long(c, a)], n = s.filter(Boolean).length;
+      if (!n) { out.push([a, b, c]); continue; }
+      split = true; const ab = s[0] && mid(a, b), bc = s[1] && mid(b, c), ca = s[2] && mid(c, a);
+      if (n === 3) out.push([a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]);
+      else if (n === 1) { if (ab) out.push([a, ab, c], [ab, b, c]); else if (bc) out.push([a, b, bc], [a, bc, c]); else out.push([a, b, ca], [ca, b, c]); }
+      else if (!ca) out.push([a, ab, c], [ab, b, bc], [ab, bc, c]);
+      else if (!ab) out.push([a, b, ca], [ca, b, bc], [ca, bc, c]);
+      else out.push([a, ab, ca], [ab, b, c], [ab, c, ca]);
+    }
+    tris = out; if (!split) break;
+  }
+  const res = new THREE.BufferGeometry();
+  names.forEach((n, j) => { const sz = A[j].itemSize, arr = new Float32Array(tris.length * 3 * sz); let o = 0; for (const t of tris) for (const v of t) for (const x of v[j]) arr[o++] = x; res.setAttribute(n, new THREE.BufferAttribute(arr, sz)); });
+  return res;
+}
+// The flat front and back faces of the front get the normals of the bent surface itself (from wrapSlope) instead of the averaged
+// normals of their long chord triangles, which pulled neighbouring vertices' normals off and made the corner shine in patches.
+// ?cn=0 turns it off.
+function frontGeo(fg, lenses) {
+  const g = tessellate(fg), p = g.attributes.position, z0 = Float32Array.from({ length: p.count }, (_, i) => p.getZ(i));
+  let lo = Infinity, hi = -Infinity; for (const z of z0) { lo = Math.min(lo, z); hi = Math.max(hi, z); }
+  smooth(bend(g));
+  const n = g.attributes.normal, near = (z, c) => Math.abs(z - c) < 1e-3;
+  if (CAP_N) for (let i = 0; i < p.count; i += 3) for (const [c, s] of [[hi, 1], [lo, -1]]) {
+    if (!(near(z0[i], c) && near(z0[i + 1], c) && near(z0[i + 2], c))) continue;
+    for (let k = i; k < i + 3; k++) { const m = -wrapSlope(p.getX(k)) * s, l = Math.hypot(m, 1); n.setXYZ(k, m / l, 0, s / l); }
+  }
+  n.needsUpdate = true;
+  g.setAttribute('occ', new THREE.BufferAttribute(innerWallOcclusion(p, n, lenses), 1));
+  return g;
+}
+// v28 (polish): the inner walls of the lens openings face across the opening, at the lens, the other wall and the face, not at the
+// room: on the real frame they stay black. Lit by the whole room they showed as a bright line round the inside of each rim (most
+// visible on the laptop clip under the ceiling light). Per vertex: how much the normal points to the lens centre, within 1.6 mm
+// of the lens outline -> less reflected room light (occ, used by occlude() below); the same, weaker, for faces turned down.
+// ?occk=0 turns it off.
+const OCC_K = +(new URLSearchParams(location.search).get('occk') ?? .85);
+function innerWallOcclusion(p, n, lenses) {
+  const out = new Float32Array(p.count).fill(1); if (!OCC_K) return out;
+  const L = lenses.map(c => {
+    let cx = 0, cy = 0; c.forEach(q => { cx += q[0]; cy += q[1]; }); cx /= c.length; cy /= c.length;
+    const r = new Float32Array(720).fill(-1);
+    for (const q of c) { const b = Math.round((Math.atan2(q[1] - cy, q[0] - cx) / Math.PI + 1) * 360) % 720; r[b] = Math.max(r[b], Math.hypot(q[0] - cx, q[1] - cy)); }
+    for (let pass = 0; pass < 4; pass++) for (let b = 0; b < 720; b++) if (r[b] < 0) r[b] = Math.max(r[(b + 719) % 720], r[(b + 1) % 720]);
+    return { cx, cy, r };
+  });
+  for (let i = 0; i < p.count; i++) {
+    // faces turned down (underside of the bridge and of the rims) look at the nose and cheeks, not at the room either
+    if (n.getY(i) < 0) out[i] = 1 - .6 * OCC_K * Math.min(1, -n.getY(i) * 1.4);
+    const x = p.getX(i), y = p.getY(i), l = L[x < 0 ? 0 : 1], dx = x - l.cx, dy = y - l.cy, rr = Math.hypot(dx, dy) || 1;
+    const d = Math.abs(rr - l.r[Math.round((Math.atan2(dy, dx) / Math.PI + 1) * 360) % 720]); if (d > 1.6) continue;
+    const s = -(n.getX(i) * dx + n.getY(i) * dy) / rr; if (s <= 0) continue;
+    out[i] = Math.min(out[i], 1 - OCC_K * Math.min(1, s) * Math.min(1, (1.6 - d) / .6));
+  }
+  return out;
+}
+// multiplies the room light reflected by the material with the geometry's `occ` attribute
+function occlude(m) {
+  m.onBeforeCompile = sh => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float occ; varying float vOcc;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvOcc = occ;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vOcc;').replace('#include <aomap_fragment>',
+      '#include <aomap_fragment>\nreflectedLight.indirectDiffuse *= vOcc; reflectedLight.indirectSpecular *= vOcc;\n#ifdef USE_CLEARCOAT\nclearcoatSpecularIndirect *= vOcc;\n#endif');
+  };
+  m.customProgramCacheKey = () => 'occ'; return m;
+}
 const v2 = a => a.map(p => new THREE.Vector2(p[0], p[1]));
 // The outline and lenses were traced from photos pixel by pixel: their edges are staircases (steps of 0.14 mm), which the
 // glossy finish showed as ridges across the top of the frame. Smoothed along the edge (gaussian, sigma in mm).
@@ -204,7 +288,7 @@ export function buildTomFord() {
   // bevelOffset keeps the rounded edge inside the traced outline, so the rims stay as slim as on the real frame
   const fg = new THREE.ExtrudeGeometry(shape, { depth: 4.0, bevelEnabled: true, bevelThickness: 1.0, bevelSize: .9, bevelOffset: -.9, bevelSegments: 5, curveSegments: 6, steps: 1 });
   fg.translate(0, 0, -4.6);
-  const fm = new THREE.Mesh(smooth(bend(fg)), acetate); fm.renderOrder = 2; front.add(fm);
+  const fm = new THREE.Mesh(frontGeo(fg, LENS), occlude(acetate.clone())); fm.renderOrder = 2; front.add(fm);
   for (const c of LENS) { const m = new THREE.Mesh(lensGeo(c), lensMat); m.renderOrder = 6; front.add(m); const k = new THREE.Mesh(m.geometry, maskMat); k.renderOrder = 1; front.add(k); }
 
   // the silver T on both corners, as on Paul's frame (photo IMG_1410): the crossbar stands upright on the lens side, the stem
@@ -225,5 +309,5 @@ export function buildTomFord() {
     const pivot = new THREE.Group(); pivot.position.set(s * SPEC.hingeX, SPEC.hingeY, SPEC.hingeZ + wrapZ(SPEC.hingeX) * 0); root.add(pivot);
     pivot.add(temple(s, { acetate: armAcetate, metal: armMetal, shade: armShade })); temples[n] = pivot;
   }
-  return { root, front, temples, lenses: LENS, materials: { acetate, metal, gold, lensMat }, setArmEnd: ear => setArmEnd(temples, tees, ear) };
+  return { root, front, temples, lenses: LENS, materials: { acetate: fm.material, metal, gold, lensMat }, setArmEnd: ear => setArmEnd(temples, tees, ear) };
 }

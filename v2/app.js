@@ -30,9 +30,32 @@ function roomEnv(img, w, h) {
   envX.fillStyle = g; envX.fillRect(0, 0, 256, 128);
   envX.fillStyle = 'rgba(255,255,255,.95)'; envX.fillRect(118, 6, 20, 14);   // a soft ceiling light for highlights on metal and gloss
   envX.filter = 'blur(3px)'; envX.fillStyle = 'rgba(255,255,255,.75)'; envX.fillRect(150, 22, 44, 30); envX.fillRect(52, 26, 30, 24); envX.filter = 'none';   // windows / bright walls
-  const t = new THREE.CanvasTexture(envC); t.mapping = THREE.EquirectangularReflectionMapping; t.colorSpace = THREE.SRGBColorSpace;
-  const rt = pmrem.fromEquirectangular(t); t.dispose();
+  const t = HDR ? hdrEnv() : new THREE.CanvasTexture(envC); t.mapping = THREE.EquirectangularReflectionMapping; if (!HDR) t.colorSpace = THREE.SRGBColorSpace;
+  const rt = pmrem.fromEquirectangular(t); if (!HDR) t.dispose();
   if (envRT) envRT.dispose(); envRT = rt; scene.environment = rt.texture;
+}
+// v28 (polish): the camera image tops out at white, but the lamps and windows it shows are many times brighter than the walls.
+// Glossy acetate looks glossy because it mirrors exactly those: dark everywhere, small bright highlights. With the clipped
+// image as the room, the frame mirrored a dull grey everywhere instead. The brightest parts are now expanded (x up to 1 + HDR
+// at white, from luminance HDR_KNEE up) into a half-float image, on the GPU. ?hdr=0: the old 8-bit room.
+const HDR = renderer.capabilities.isWebGL2 && (renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float')) ? +(QS.get('hdr') ?? 10) : 0;
+const HDR_KNEE = +(QS.get('hk') ?? .7);
+let hdrPass = null;
+function hdrEnv() {   // expands the canvas image into a half-float target on the GPU (no per-pixel work in JavaScript)
+  if (!hdrPass) {
+    const tex = new THREE.CanvasTexture(envC); tex.colorSpace = THREE.SRGBColorSpace;
+    const rt = new THREE.WebGLRenderTarget(256, 128, { type: THREE.HalfFloatType, depthBuffer: false });
+    const mat = new THREE.ShaderMaterial({ uniforms: { t: { value: tex }, hk: { value: HDR_KNEE }, hdr: { value: HDR } }, depthTest: false, depthWrite: false, toneMapped: false,
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+      fragmentShader: `uniform sampler2D t; uniform float hk, hdr; varying vec2 vUv;
+        void main() { vec3 c = texture2D(t, vUv).rgb; float l = dot(c, vec3(.2126, .7152, .0722)), k = max(0., (l - hk) / (1. - hk));
+          gl_FragColor = vec4(c * (1. + hdr * k * k), 1.); }` });
+    const q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); q.frustumCulled = false; const sc = new THREE.Scene(); sc.add(q);
+    hdrPass = { tex, rt, sc, cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1) };
+  }
+  hdrPass.tex.needsUpdate = true;
+  const prev = renderer.getRenderTarget(); renderer.setRenderTarget(hdrPass.rt); renderer.render(hdrPass.sc, hdrPass.cam); renderer.setRenderTarget(prev);
+  return hdrPass.rt.texture;
 }
 const bg = document.createElement('canvas'), bgCtx = bg.getContext('2d', { alpha: false });
 const bgTex = new THREE.CanvasTexture(bg); bgTex.colorSpace = THREE.SRGBColorSpace; scene.background = bgTex;
@@ -78,6 +101,103 @@ const faceGeo = new THREE.BufferGeometry();
 faceGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(468 * 3), 3));
 const faceOcc = new THREE.Mesh(faceGeo, occMat); faceOcc.renderOrder = -2; faceOcc.frustumCulled = false; head.add(faceOcc);
 const skull = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 24), occMat); skull.renderOrder = -2; skull.visible = false; head.add(skull);
+
+// ---------------------------------------------------------------- camera look (v28, polish track)
+// The glasses were drawn straight over the camera image: razor-sharp edges and a deeper black than anything the webcam shows,
+// which is what made them look pasted on. Now the frame (front, arms, T's) is drawn into its own multisampled buffer and laid
+// over the camera image with (1) the camera's softness (blur measured on the eyes, see measureSoft), (2) the camera's black level: black
+// acetate never shows darker than the darkest things in the same picture (hair, pupils; 1st percentile of the image, tinted
+// like the image) — `lift` scales it, and (3) a little grain. Shadow and lenses are still drawn directly on the camera image.
+// ?post=0: old direct drawing. Off with ghost=1.
+const POST_ON = !QS.has('ghost') && QS.get('post') !== '0';
+// soft: multiplier on the measured camera blur (?soft=0 sharp); softpx=N fixes it at N px instead of measuring
+const SOFT = +(QS.get('soft') ?? 1), SOFT_PX = QS.has('softpx') ? +QS.get('softpx') : null, LIFT = +(QS.get('lift') ?? .85), GRAIN = +(QS.get('grain') ?? 1.5);
+const L_RT = 1, L_DIRECT = 2, BOX_ON = QS.get('box') !== '0';
+const look = { lift: new THREE.Vector3(), target: new THREE.Vector3(), seed: 0, sig: SOFT_PX ?? 1, sigs: [], skip: 0 };
+let post = null;
+function makePost() {
+  const gl = renderer.getContext(), ok = renderer.capabilities.isWebGL2 && (renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float'));
+  if (!ok) return null;
+  const rt = new THREE.WebGLRenderTarget(2, 2, { type: QS.get('rtf') === '8' ? THREE.UnsignedByteType : THREE.HalfFloatType, samples: +(QS.get('rts') ?? 4), stencilBuffer: true, depthBuffer: true });
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { tex: { value: rt.texture }, px: { value: new THREE.Vector2(.5, .5) }, sig: { value: 0 }, lift: { value: look.lift }, grain: { value: GRAIN }, seed: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+    fragmentShader: `uniform sampler2D tex; uniform vec2 px; uniform float sig, grain, seed; uniform vec3 lift; varying vec2 vUv;
+      void main() {
+        vec4 s = vec4(0.); float wsum = 0.;
+        for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) { float w = exp(-.5 * float(i * i + j * j)); s += w * texture2D(tex, vUv + vec2(i, j) * px * sig); wsum += w; }
+        s /= wsum;   // premultiplied colour, so the blur also softens the edge against the camera image
+        if (s.a < .003) discard;
+        gl_FragColor = vec4(s.rgb / s.a, s.a);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        float n = fract(sin(dot(gl_FragCoord.xy + seed, vec2(12.9898, 78.233))) * 43758.5453) - .5;
+        gl_FragColor.rgb = lift + (1. - lift) * gl_FragColor.rgb + n * grain / 255.;
+      }`,
+    transparent: true, depthTest: false, depthWrite: false });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); quad.frustumCulled = false;
+  const qs = new THREE.Scene(); qs.add(quad);
+  return { rt, mat, qs, qc: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1) };
+}
+// every mesh keeps layer 0 (the old direct drawing); the frame goes on L_RT, shadow and lenses on L_DIRECT, the invisible
+// occluders and lens masks on both
+function assignLayers() {
+  scene.traverse(o => { if (!o.isMesh) return; const m = Array.isArray(o.material) ? o.material[0] : o.material;
+    if (m.colorWrite === false) { o.layers.enable(L_RT); o.layers.enable(L_DIRECT); }
+    else if (m.blending === THREE.MultiplyBlending || m.blending === THREE.AdditiveBlending) o.layers.enable(L_DIRECT);
+    else o.layers.enable(L_RT); });
+}
+// How soft the camera image is, measured every 30 frames on the eyes (lashes, iris and lid edges are the sharpest edges in the
+// picture): for an edge blurred by a gaussian of sigma s, (local contrast) / (steepest gradient) = s * sqrt(2 pi). The 10th
+// percentile over the strongest 3% of edges, corrected for pixel size (checked on synthetic edges: within 0.1 px for s 0.8-2),
+// read 0.8-1.1 px on Paul's laptop and iPhone clips (960x640). The frame then gets that blur minus its own (~0.4 px, multisampled).
+function measureSoft(ctx, pts) {
+  if (SOFT_PX !== null || !SOFT) return;
+  if (look.sigs.length >= 5 && ++look.skip % 10) return;   // settled: every 10th time (~10 s)
+  const a = pts[33], b = pts[263], x0 = Math.max(0, Math.min(a[0], b[0]) - 30 | 0), x1 = Math.min(W, Math.max(a[0], b[0]) + 30 | 0);
+  const y0 = Math.max(0, Math.min(a[1], b[1]) - 40 | 0), y1 = Math.min(H, Math.max(a[1], b[1]) + 30 | 0), w = x1 - x0, h = y1 - y0;
+  if (w < 60 || h < 30 || w * h > 400000) return;
+  const d = ctx.getImageData(x0, y0, w, h).data, N = w * h, L = new Float32Array(N), mx = new Float32Array(N), mn = new Float32Array(N), C = new Uint8Array(N);
+  for (let i = 0; i < N; i++) L[i] = .3 * d[i * 4] + .6 * d[i * 4 + 1] + .1 * d[i * 4 + 2];
+  const R = 3;   // local contrast = max - min over 7 x 7 pixels (separable)
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let hi = -1, lo = 1e9; const e = Math.min(w - 1, x + R); for (let k = Math.max(0, x - R); k <= e; k++) { const v = L[y * w + k]; if (v > hi) hi = v; if (v < lo) lo = v; } mx[y * w + x] = hi; mn[y * w + x] = lo; }
+  const hist = new Uint32Array(256);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let hi = -1, lo = 1e9; const e = Math.min(h - 1, y + R); for (let k = Math.max(0, y - R); k <= e; k++) { const i = k * w + x; if (mx[i] > hi) hi = mx[i]; if (mn[i] < lo) lo = mn[i]; } const c = Math.min(255, hi - lo | 0); C[y * w + x] = c; hist[c]++; }
+  let thr = 255; for (let acc = 0; thr > 0 && (acc += hist[thr]) < N * .03; thr--);
+  if (thr < 20) return;   // too flat (dark room, eyes closed): keep the last value
+  const S = [];
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; if (C[i] < thr) continue;
+    const g = Math.hypot(L[i + 1] - L[i - 1], L[i + w] - L[i - w]) / 2; S.push(C[i] / (g * 2.5066 + 1e-6)); }
+  if (S.length < 20) return;
+  S.sort((p, q) => p - q); const e = S[Math.floor(S.length * .1)], cam = Math.sqrt(Math.max(0, e * e - .36));
+  look.sigs.push(Math.sqrt(Math.max(0, cam * cam - .16))); if (look.sigs.length > 5) look.sigs.shift();
+  look.sig = Math.min(3, median(look.sigs));
+}
+const clearC = new THREE.Color(), BOX = [], bv = new THREE.Vector3();
+for (const x of [-78, 78]) for (const y of [-34, 34]) for (const z of [14, -150]) BOX.push([x, y, z]);
+function screenBox() {
+  glasses.root.updateWorldMatrix(true, false); let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const p of BOX) { bv.set(...p).applyMatrix4(glasses.root.matrixWorld).project(camera); x0 = Math.min(x0, bv.x); x1 = Math.max(x1, bv.x); y0 = Math.min(y0, bv.y); y1 = Math.max(y1, bv.y); }
+  const m = 8 + 4 * look.sig, X0 = Math.max(0, Math.floor((x0 + 1) / 2 * W - m)), Y0 = Math.max(0, Math.floor((y0 + 1) / 2 * H - m));
+  const X1 = Math.min(W, Math.ceil((x1 + 1) / 2 * W + m)), Y1 = Math.min(H, Math.ceil((y1 + 1) / 2 * H + m));
+  return X1 > X0 && Y1 > Y0 ? [X0, Y0, X1 - X0, Y1 - Y0] : null;   // GL pixels, origin bottom left
+}
+function draw() {
+  const box = post && head.visible && screenBox();
+  if (!box) { renderer.render(scene, camera); return; }
+  look.lift.lerp(look.target, .15);
+  const u = post.mat.uniforms; u.sig.value = SOFT * look.sig / .74;   // the 3x3 kernel's spread is .74 x its tap spacing
+  u.px.value.set(1 / W, 1 / H); u.seed.value = (look.seed = (look.seed + 1) % 997);
+  camera.layers.set(L_DIRECT); renderer.render(scene, camera);
+  const bgSave = scene.background, a0 = renderer.getClearAlpha(); renderer.getClearColor(clearC);
+  scene.background = null; renderer.setClearColor(0x000000, 0);
+  post.rt.scissor.set(...box); post.rt.scissorTest = BOX_ON; renderer.setRenderTarget(post.rt);
+  camera.layers.set(L_RT); renderer.render(scene, camera);
+  renderer.setRenderTarget(null); scene.background = bgSave; renderer.setClearColor(clearC, a0);
+  renderer.setScissor(...box); renderer.setScissorTest(BOX_ON);
+  renderer.autoClear = false; renderer.render(post.qs, post.qc); renderer.autoClear = true;
+  renderer.setScissorTest(false); camera.layers.set(0);
+}
 
 function buildTris() {
   if (typeof FACEMESH_TESSELATION === 'undefined') return;
@@ -202,7 +322,7 @@ const resetFilters = () => { rotF.reset(); zF.reset(); axF.reset(); ayF.reset();
 function resize(w, h) {
   if (w === W && h === H) return;
   W = w; H = h; bg.width = w; bg.height = h; bgTex.dispose();
-  renderer.setSize(w, h, false); canvas.style.aspectRatio = `${w} / ${h}`; stage.style.setProperty('--ar', `${w} / ${h}`);
+  renderer.setSize(w, h, false); if (post) post.rt.setSize(w, h); canvas.style.aspectRatio = `${w} / ${h}`; stage.style.setProperty('--ar', `${w} / ${h}`);
   camera.aspect = w / h; camera.updateProjectionMatrix();
   cam.f = (h / 2) / Math.tan(FOV * Math.PI / 360); cam.cx = w / 2; cam.cy = h / 2;
 }
@@ -293,6 +413,14 @@ function adaptLight(ctx) {
   const d = ctx.getImageData(W * .25 | 0, H * .2 | 0, W * .5 | 0, H * .5 | 0).data; let s = 0, n = 0;
   for (let i = 0; i < d.length; i += 400) { s += .3 * d[i] + .6 * d[i + 1] + .1 * d[i + 2]; n++; }
   const lum = s / n / 255; renderer.toneMappingExposure = Math.max(.75, Math.min(1.25, .7 + lum * .75));
+  // camera black level (v28): 1st percentile of the brightness, tinted a little like the whole picture (4th root of its colour
+  // cast: the real frame in Paul's iPhone clip is almost neutral, rgb 57/54/53, in a warm picture, 149/140/128)
+  const L = [], mean = [0, 0, 0];
+  for (let i = 0; i < d.length; i += 400) { L.push(.3 * d[i] + .6 * d[i + 1] + .1 * d[i + 2]); mean[0] += d[i]; mean[1] += d[i + 1]; mean[2] += d[i + 2]; }
+  L.sort((a, b) => a - b); const p1 = L[Math.floor(L.length * .01)] / 255, ml = (.3 * mean[0] + .6 * mean[1] + .1 * mean[2]) || 1;
+  const t = mean.map(c => (c / ml) ** .25), k = Math.min(.22, p1 * LIFT);
+  look.target.set(k * t[0], k * t[1], k * t[2]);
+  if (look.lift.lengthSq() === 0) look.lift.copy(look.target);
 }
 
 function onResults(res) {
@@ -311,7 +439,7 @@ function onResults(res) {
     if (t0 - lostAt > LOST_MS) { head.visible = false; resetFilters(); found = 0; }
     else head.visible = false;
     resize(w, h); bgCtx.drawImage(img, 0, 0, w, h); bgTex.needsUpdate = true;
-    renderer.render(scene, camera); if (perf) { perf.hidden(); perf.drawn(performance.now() - c0); } return;
+    draw(); if (perf) { perf.hidden(); perf.drawn(performance.now() - c0); } return;
   }
   const m0 = performance.now(); resize(w, h); bgCtx.drawImage(img, 0, 0, w, h); bgTex.needsUpdate = true;
   lostAt = null;
@@ -320,8 +448,8 @@ function onResults(res) {
   if (scan.on) scanStep(tr, t0);
   if (!scan.on) { setHead(tr); head.visible = found > 4; }   // a face just found again is often misread for a few frames
   const m2 = performance.now();
-  if (++seen % 30 === 1) { adaptLight(bgCtx); const a = performance.now(); roomEnv(img, w, h); if (perf) { perf.step('light', a - m2); perf.step('env', performance.now() - a); } }
-  const m4 = performance.now(); renderer.render(scene, camera);
+  if (++seen % 30 === 1) { adaptLight(bgCtx); if (post) measureSoft(bgCtx, tr.pts); const a = performance.now(); roomEnv(img, w, h); if (perf) { perf.step('light', a - m2); perf.step('env', performance.now() - a); } }
+  const m4 = performance.now(); draw();
   if (perf) { perf.step('bg', m1 - m0); perf.step('track', m2 - m1); perf.step('render', performance.now() - m4); }
   if (perf) { if (!head.visible && !scan.on) perf.hidden(); perf.drawn(performance.now() - c0); }
   window.__tryon.ms = performance.now() - c0; window.__tryon.pose = tr; window.__tryon.rms = tr.raw.rms;
@@ -382,6 +510,7 @@ function makePerf() {
         `ours/frame: ${Object.entries(P.steps).filter(([k]) => k !== 'light' && k !== 'env').map(([k, o]) => k + ' ' + f1(o.sum / o.n)).join('  ')} ms\n` +
         `every 30th: ${['light', 'env'].map(k => P.steps[k] ? k + ' ' + f1(P.steps[k].sum / P.steps[k].n) + ' (max ' + Math.round(P.steps[k].max) + ')' : '').join('  ')} ms\n` +
         `wasm SIMD ${SIMD ? 'yes' : 'NO'}  input ${P.input || 'camera'}  ${P.size}\n` +
+        `look: ${post ? `blur ${look.sig.toFixed(2)} px  black ${Math.round(look.lift.y * 255)}/255` : 'direct (post off)'}  room ${HDR ? 'HDR' : '8-bit'}\n` +
         `total: ${T.res} results · not tracked ${pct(T.camLost, T.cam + T.camLost)} · frozen ${T.frozen} · no glasses ${T.hidden} · gaps>50ms ${T.gap50} · worst ${Math.round(T.gapMax)} ms`;
       P.s = zero(); P.t = now;
     }
@@ -451,5 +580,7 @@ $('upBtn').addEventListener('click', () => { nudge = Math.min(5, nudge + .5); ap
 $('downBtn').addEventListener('click', () => { nudge = Math.max(-5, nudge - .5); applyFit(); renderFitCard(); });
 
 buildTris(); setOccluders(); fit = computeFit(); applyFit();
+if (POST_ON) { post = makePost(); assignLayers(); }
 if (!QS.has('nopre')) ensureMesh().catch(e => console.error(e));   // preload while the start page is shown
-window.__tryon = { onResults, scan, glasses, camera, head, THREE, beginScan, finishScan, get model() { return model; }, get fit() { return fit; }, cam, yawOf, render: () => renderer.render(scene, camera), resize, stats: () => ({ scanned }), perf };
+window.__tryon = { onResults, scan, glasses, camera, head, THREE, beginScan, finishScan, get model() { return model; }, get fit() { return fit; }, cam, yawOf, render: draw, resize, stats: () => ({ scanned }), perf, look };
+if (QS.has("bench")) window.__tryon.bench = () => { const t = f => { const a = performance.now(); for (let i = 0; i < 20; i++) f(); return +((performance.now() - a) / 20).toFixed(2); }; const p = window.__tryon.pose.pts; return { light: t(() => adaptLight(bgCtx)), soft: t(() => { look.sigs.length = 0; measureSoft(bgCtx, p); }), env: t(() => roomEnv(bg, W, H)) }; };

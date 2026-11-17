@@ -8,7 +8,7 @@ try:
     with sync_playwright() as p:
         b = p.chromium.launch(args=['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']); pg = b.new_page(viewport={'width': 1400, 'height': 900})
         errs = []; pg.on('pageerror', lambda e: errs.append(str(e)))
-        for v in ('front', 'q', 'side', 'top', 'hinge', 'back'):
+        for v in (os.environ.get('VIEWS') or 'front,q,side,top,hinge,back').split(','):
             pg.goto(f'http://localhost:{port}/v2/product.html?view={v}&{extra}'); pg.wait_for_function('window.done', timeout=30000)
             pg.locator('canvas').screenshot(path=f'{out}/{v}.png')
         print('errors', errs[:3]); b.close()
