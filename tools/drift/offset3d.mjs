@@ -16,7 +16,7 @@ function fit(rows, dims) {
     // basis: unit offsets in head x, y, z (z by moving the projection point along head z)
     const J = dims.map(d => { if (d < 2) { const D = [0, 0]; D[d] = 1; const c = cen(f, D); return [(c[0] - c0[0]) / pxmm, (c[1] - c0[1]) / pxmm]; }
       const l = lensPts(ctx, f.R, f.t, {}), P = [0, 0, 1], a = project(ctx.cam, f.R, f.t, [0, 0, 0]), bb = project(ctx.cam, f.R, f.t, P); return [(bb[0] - a[0]) / pxmm, (bb[1] - a[1]) / pxmm]; });
-    for (let k = 0; k < 2; k++) { A.push(J.map(j => j[k]).concat([k === 0 ? 1 : 0, k === 1 ? 1 : 0].slice(0, 0))); b.push(k ? w.dy : w.dx); } }
+    for (let k = 0; k < 2; k++) { A.push(J.map(j => j[k])); b.push(k ? w.dy : w.dx); } }
   // normal equations
   const n = dims.length, M = Array.from({ length: n }, () => new Array(n).fill(0)), g = new Array(n).fill(0);
   A.forEach((a, i) => { for (let p = 0; p < n; p++) { g[p] += a[p] * b[i]; for (let s = 0; s < n; s++) M[p][s] += a[p] * a[s]; } });
@@ -27,7 +27,7 @@ function fit(rows, dims) {
   return { x, res };
 }
 const med = a => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
-const SEG = [[400, 440], [456, 500], [552, 592], [656, 680], [704, 728], [768, 792], [824, 848]];
+const SEG = [[400, 440], [456, 500], [552, 592], [656, 680], [704, 728], [768, 792], [824, 848]].filter(([a, b]) => use.some(w => w.i >= a && w.i <= b));
 for (const dims of [[0, 1], [0, 1, 2]]) {
   const { x, res } = fit(use, dims);
   const rx = use.map((w, i) => res[2 * i]), ry = use.map((w, i) => res[2 * i + 1]);
