@@ -16,6 +16,11 @@
 //    +33..+49), and with olm=0 its extent matches there, but ours is ~2x as thick and lower, and on the iPhone clip at yaw
 //    -35..-45 it crosses the middle of the lens where the real one is not seen at all (our far arm runs lower than the real
 //    one: fit track). So the lens mask stays on by default.
+// Post pass (v28): all meshes here use colorWrite false (occMat), so assignLayers() puts them on L_RT and L_DIRECT; they must
+// be created before assignLayers() runs (initOcc is called at load, before makePost). The cut they make in the frame is then
+// blurred with the camera's measured softness like every other edge of the frame, so it is no harder than the real nose edge.
+// The cut moves rigidly with the same filtered head pose as the frame; the only per-frame extra is the nose move, a smooth
+// function of the filtered yaw, so it does not flicker.
 // ?ocv=1 (test only): draws the face occluder in translucent green, to compare its outline with the real nose and face.
 export function initOcc({ THREE, head, faceGeo, glasses, occMat, QS }) {
   const mode = +(QS.get('oc') ?? 0);
