@@ -42,7 +42,8 @@ for i in sorted(rec):
     w = best(Mc, Dc)
     if not w: continue
     x, y, z, ww = r['R']; fx, fy, fz = 2 * (x * z + ww * y), 2 * (y * z - ww * x), 1 - 2 * (x * x + y * y)
-    o = {'all': w, 'L': best(Mc & (xs < cxm), Dc), 'R': best(Mc & (xs >= cxm), Dc), 'sep': round(sep, 1),
+    ys = np.arange(Y0, Y1)[:, None] + 0 * Mc   # top half (top bar) and bottom half (lower rim) of the front, split at the lens centres
+    o = {'all': w, 'L': best(Mc & (xs < cxm), Dc), 'R': best(Mc & (xs >= cxm), Dc), 'T': best(Mc & (ys < cy), Dc), 'B': best(Mc & (ys >= cy), Dc), 'sep': round(sep, 1),
          'yaw': float(np.degrees(np.arctan2(fx, fz))), 'pitch': float(np.degrees(np.arctan2(fy, np.hypot(fx, fz)))),
          'pxmm': float((320 / np.tan(np.radians(float(os.environ.get('FOV', 46)) / 2))) / -r['t'][2])}
     out[i] = o
