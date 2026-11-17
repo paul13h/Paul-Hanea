@@ -5,13 +5,24 @@
 //    hides it (Paul's real frame, iPhone clip, yaw 30-50; the occluder's outline matches the real nose, ?ocv=1). Now the half of
 //    the nose turned away from the camera, below the bridge, is moved towards the camera along the line of sight: its outline
 //    in the picture stays exactly the same, but the far rim behind that outline is hidden. The near half stays where it was.
+//  - Far arm: v27 hid the arm on the side turned away from the camera as soon as the turn passed ~15° (it popped off) and never
+//    drew either arm behind a lens. On the real frame (Paul's laptop clip, yaw 10-30) the far arm shows through the far lens,
+//    against the background, up to where it goes behind the side of the face. Now both arms are always drawn, also behind the
+//    lenses, and the head hides them: the face occluder plus a skull (an ellipsoid inside the arms that fills the head behind
+//    the face, so the far arm cannot show through the gap behind the edge of the face mesh).
 // ?ocv=1 (test only): draws the face occluder in translucent green, to compare its outline with the real nose and face.
-export function initOcc({ THREE, head, faceGeo, QS }) {
+export function initOcc({ THREE, head, faceGeo, glasses, occMat, QS }) {
   const mode = +(QS.get('oc') ?? 0);
   // d: mm the far half of the nose moves towards the camera; k: sin(yaw) at which it has moved all the way;
   // y0..y1: mm under the eye line where the move fades in (the bridge sits on the nose above that)
-  const P = { d: +(QS.get('ofd') ?? 6), k: +(QS.get('ofk') ?? .3), y0: +(QS.get('oy0') ?? 12), y1: +(QS.get('oy1') ?? 18) };
+  const P = { d: +(QS.get('ofd') ?? 10), k: +(QS.get('ofk') ?? .3), y0: +(QS.get('oy0') ?? 8), y1: +(QS.get('oy1') ?? 14) };
   let last = null, nose = [], midX = 0, noseC = [0, 0, 0], nearZ = 0, eyeY = 0;
+  const SK = { in: +(QS.get('osi') ?? 3), front: +(QS.get('osf') ?? -30), back: +(QS.get('osb') ?? -185), top: +(QS.get('ost') ?? 95), bot: +(QS.get('osd') ?? -70) };
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 28), occMat); skull.renderOrder = -2; skull.visible = false; head.add(skull);
+  if (mode) {
+    // arms drawn behind the lenses too (the lens shapes no longer mask them out; the head occluders hide what the head hides)
+    for (const t of Object.values(glasses.temples)) t.traverse(o => { if (o.isMesh) for (const m of [].concat(o.material)) if (m.stencilWrite && m.stencilFunc === THREE.NotEqualStencilFunc) m.stencilWrite = false; });
+  }
   if (QS.has('ocv')) {
     const m = new THREE.Mesh(faceGeo, new THREE.MeshBasicMaterial({ color: 0x00ff40, transparent: true, opacity: .28, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
     m.renderOrder = 20; m.frustumCulled = false; head.add(m);
@@ -22,12 +33,20 @@ export function initOcc({ THREE, head, faceGeo, QS }) {
     const p = faceGeo.attributes.position; midX = model[168][0]; nearZ = noseZ; nose = []; eyeY = (model[133][1] + model[362][1]) / 2;
     for (let i = 0; i < 468; i++) if (isNose[i]) nose.push({ i, x: p.getX(i), y: p.getY(i), z: p.getZ(i) - noseZ, ax: model[i][0] - midX });
     noseC = [model[4][0], model[4][1], model[4][2]];
+    // skull: an ellipsoid between the sides of the face (minus SK.in mm, so it stays inside the arms, which run 2.5 mm outside
+    // them), from SK.front to SK.back mm behind the nose bridge, SK.bot..SK.top mm above it
+    const side = Math.min(...[234, 127, 162].map(k => midX - model[k][0]), ...[454, 356, 389].map(k => model[k][0] - midX));
+    const y0 = model[168][1], z0 = model[168][2];
+    skull.scale.set(side - SK.in, (SK.top - SK.bot) / 2, (SK.front - SK.back) / 2);
+    skull.position.set(midX, y0 + (SK.top + SK.bot) / 2, z0 + (SK.front + SK.back) / 2);
+    skull.visible = true;
   }
   const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   // every frame: R (quaternion x,y,z,w) and t of the head
   function frame(R, t) {
     last = [R, t];
     if (!mode || !nose.length) return;
+    glasses.temples.L.visible = glasses.temples.R.visible = true;   // the head hides the far arm, not a cut-off angle
     // camera position in head coordinates: R^-1 (-t)
     const [qx, qy, qz, qw] = R, ix = -qx, iy = -qy, iz = -qz, px = -t[0], py = -t[1], pz = -t[2];
     const ux = 2 * (iy * pz - iz * py), uy = 2 * (iz * px - ix * pz), uz = 2 * (ix * py - iy * px);
@@ -36,7 +55,7 @@ export function initOcc({ THREE, head, faceGeo, QS }) {
     const p = faceGeo.attributes.position;
     for (const n of nose) {
       // away: how far this vertex is on the side of the nose turned away from the camera; only below the frame's bridge
-      // (seat ~11 mm under the eye line), so the bridge, which sits on the nose, is never cut
+      // (seat ~11 mm under the eye line; the move is full from 14 mm down), so the bridge, which sits on the nose, is never cut
       const away = -Math.sign(n.ax) * s, k = sstep(.05, P.k, away) * sstep(.5, 3, Math.abs(n.ax)) * sstep(eyeY - P.y0, eyeY - P.y1, n.y);
       let x = n.x, y = n.y, z = n.z + nearZ * (1 - k);
       if (k > 0) { const ex = cx - x, ey = cy - y, ez = cz - z, d = P.d * k / Math.hypot(ex, ey, ez); x += ex * d; y += ey * d; z += ez * d; }
@@ -45,6 +64,6 @@ export function initOcc({ THREE, head, faceGeo, QS }) {
     p.needsUpdate = true;
   }
   // test tools: change the parameters and redo the last frame (several variants from one tracking run)
-  const set = o => { Object.assign(P, o); if (last) frame(...last); };
+  const set = o => { Object.assign(P, o); for (const k in o) if (k in SK) SK[k] = o[k]; if (o.skull !== undefined) skull.visible = !!o.skull; if (last) frame(...last); };
   return { mode, build, frame, set, P };
 }

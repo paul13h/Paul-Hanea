@@ -79,7 +79,7 @@ const faceGeo = new THREE.BufferGeometry();
 faceGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(468 * 3), 3));
 const faceOcc = new THREE.Mesh(faceGeo, occMat); faceOcc.renderOrder = -2; faceOcc.frustumCulled = false; head.add(faceOcc);
 const skull = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 24), occMat); skull.renderOrder = -2; skull.visible = false; head.add(skull);
-const occ = initOcc({ THREE, head, faceGeo, QS });   // ?oc=1: occluders v2 (v2/occluder.js)
+const occ = initOcc({ THREE, head, faceGeo, glasses, occMat, QS });   // ?oc=1: occluders v2 (v2/occluder.js)
 
 function buildTris() {
   if (typeof FACEMESH_TESSELATION === 'undefined') return;
