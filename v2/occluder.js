@@ -23,7 +23,7 @@
 // function of the filtered yaw, so it does not flicker.
 // ?ocv=1 (test only): draws the face occluder in translucent green, to compare its outline with the real nose and face.
 export function initOcc({ THREE, head, faceGeo, glasses, occMat, QS }) {
-  const mode = +(QS.get('oc') ?? 0);
+  const mode = +(QS.get('oc') ?? 1);
   // d: mm the far half of the nose moves towards the camera; k: sin(yaw) at which it has moved all the way;
   // y0..y1: mm under the eye line where the move fades in (the bridge sits on the nose above that)
   const P = { d: +(QS.get('ofd') ?? 10), k: +(QS.get('ofk') ?? .3), y0: +(QS.get('oy0') ?? 8), y1: +(QS.get('oy1') ?? 14) };
