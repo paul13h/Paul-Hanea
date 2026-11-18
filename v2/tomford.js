@@ -233,14 +233,14 @@ function temple(side, mats) {
 // Fits the arms to the face: rebuilds them for the current angles between arm and front, puts the ear where the arm meets
 // the top of the ear (ear = distance along the arm from the hinge, from the face scan), fades out the tip that runs behind
 // the ear, and puts the T where the arm's silver line meets the front.
-function setArmEnd(temples, tees, ear) {
+function setArmEnd(temples, tees, earAll) {
   for (const pivot of Object.values(temples)) {
-    const t = pivot.children[0], u = t.userData, side = u.side;
+    const t = pivot.children[0], u = t.userData, side = u.side, ear = typeof earAll === 'number' ? earAll : earAll[side < 0 ? 'L' : 'R'];
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(pivot.quaternion);          // the arm's direction, front coordinates
     const zf = wrapZ(70.4) + .2, L = zf - SPEC.hingeZ;                                   // front face to hinge seam
     // rel is rounded to 0.01 rad (0.6°): looking down, the fit changes the arm/front angle every frame (app.js poseFit), and the
     // arm is only rebuilt when the rounded angle changes
-    const rel = Math.round(Math.atan2(-dir.y, -dir.z) / .01) * .01, open = Math.abs(Math.atan2(dir.x, -dir.z));
+    const rel = Math.round(Math.atan2(-dir.y, -dir.z) / .01) * .01, open = Math.round(Math.abs(Math.atan2(dir.x, -dir.z)) / .01) * .01;
     const f = { side, L, open, rel }, key = [rel, open].map(x => x.toFixed(3)).join();
     if (key !== u.key) {
       const geo = buildArm(f); u.arm.geometry.dispose(); u.line.geometry.dispose();
