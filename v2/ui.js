@@ -20,9 +20,10 @@ const HINTS = {
   dark: 'Etwas mehr Licht verbessert die Anprobe.',
 };
 function cameraHelp() {
-  if (IOS) return 'Tippen Sie in der Adressleiste auf „aA“ › Website-Einstellungen › Kamera › Erlauben. Laden Sie die Seite danach neu.';
-  if (SAFARI) return 'In Safari: Menü Safari › Einstellungen für diese Website › Kamera › Erlauben. Laden Sie die Seite danach neu.';
-  return 'Klicken Sie auf das Kamera- oder Schloss-Symbol in der Adressleiste und erlauben Sie die Kamera.';
+  // iOS 18 replaced the „aA“ button with a page-menu icon at the left of the address bar; both lead to „Website-Einstellungen“
+  if (IOS) return 'Tippen Sie links in der Adressleiste auf das Seitenmenü-Symbol (bei älteren iOS-Versionen „aA“) › Website-Einstellungen › Kamera › Erlauben. Laden Sie danach die Seite neu.';
+  if (SAFARI) return 'In Safari: Menü Safari › Einstellungen für diese Website › Kamera › Erlauben. Laden Sie danach die Seite neu.';
+  return 'Klicken Sie auf das Kamera- oder Schloss-Symbol in der Adressleiste, erlauben Sie die Kamera und laden Sie danach die Seite neu.';
 }
 function errorCopy(step, e) {
   const n = e && e.name;
@@ -31,7 +32,7 @@ function errorCopy(step, e) {
     : ['Kamera nicht verfügbar', 'Dieser Browser erlaubt keinen Kamerazugriff.', IOS ? 'Bitte öffnen Sie die Seite direkt in Safari.' : 'Bitte öffnen Sie die Seite in einer aktuellen Version von Safari, Chrome oder Firefox.', false];
   if (step === 'mesh') return ['Gesichtserkennung nicht verfügbar', 'Die Gesichtserkennung konnte nicht geladen werden.', 'Bitte prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.', true];
   if (step === 'ended') return ['Die Kamera wurde getrennt', 'Das Kamerabild ist nicht mehr verfügbar.', 'Bitte prüfen Sie die Kamera und versuchen Sie es erneut.', true];
-  if (n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError') return ['Kein Zugriff auf die Kamera', 'Für die Anprobe benötigt diese Seite Ihre Kamera.', cameraHelp(), true];
+  if (n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError') return ['Kein Zugriff auf die Kamera', 'Für die Anprobe benötigt diese Seite Ihre Kamera.', cameraHelp(), false];   // the browser asks again only after a reload
   if (n === 'NotFoundError' || n === 'DevicesNotFoundError' || n === 'OverconstrainedError') return ['Keine Kamera gefunden', 'Es wurde keine Kamera gefunden.', 'Bitte schließen Sie eine Kamera an oder prüfen Sie, ob sie aktiviert ist.', true];
   if (n === 'NotReadableError' || n === 'TrackStartError' || n === 'AbortError') return ['Die Kamera ist belegt', 'Eine andere Anwendung verwendet gerade die Kamera, etwa FaceTime, Zoom oder Teams.', 'Bitte schließen Sie diese Anwendung und versuchen Sie es erneut.', true];
   return ['Die Kamera konnte nicht gestartet werden', 'Beim Starten der Kamera ist ein Fehler aufgetreten.', 'Bitte versuchen Sie es erneut oder laden Sie die Seite neu.', true];
@@ -39,7 +40,7 @@ function errorCopy(step, e) {
 
 // ---------------------------------------------------------------- state
 let startFn, stream = null, running = false, lastPose = null, lastPoseAt = 0, wasScanning = false, glassesOff = false;
-let hintKey = null, cand = null, candAt = 0, dark = false, lum = 1, toastTimer = 0;
+let hintKey = null, cand = null, candAt = 0, dark = false, lum = 1, lumS = 1, darkSince = 0, brightSince = 0, toastTimer = 0;
 
 export function initUI({ start, preload }) {
   startFn = start;
@@ -52,7 +53,7 @@ export function initUI({ start, preload }) {
   $('cmpBtn').addEventListener('click', () => setGlassesOff(!glassesOff));
   $('closeShotBtn').addEventListener('click', closePhoto);
   $('saveBtn').addEventListener('click', savePhoto);
-  $('rescanBtn').addEventListener('click', () => setGlassesOff(false));
+  $('rescanBtn').addEventListener('click', () => { setGlassesOff(false); $('stage').scrollIntoView({ block: 'start', behavior: REDUCED.matches ? 'auto' : 'smooth' }); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('shotView').hidden) closePhoto(); });
   // the scan bar's width is set by app.js; mirror it for screen readers
   new MutationObserver(() => $('scanProg').setAttribute('aria-valuenow', parseInt($('scanBar').style.width) || 0)).observe($('scanBar'), { attributes: true, attributeFilter: ['style'] });
@@ -98,9 +99,9 @@ function setHint(key) {
   if (key) { $('hintText').textContent = HINTS[key]; $('toast').classList.add('off'); }   // both sit at the top
   $('hint').classList.toggle('off', !key);
 }
-function toast(text, ms = 3800) {
+function toast(text, ms = 3800, kind = 'ok') {
   if (hintKey) return;
-  $('toastText').textContent = text; $('toast').classList.remove('off');
+  $('toast').dataset.kind = kind; $('toastText').textContent = text; $('toast').classList.remove('off');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.add('off'), ms);
 }
 
@@ -108,9 +109,14 @@ function toast(text, ms = 3800) {
 const lc = document.createElement('canvas'); lc.width = 32; lc.height = 18; const lx = lc.getContext('2d', { willReadFrequently: true });
 let lumAt = 0;
 function measureLight(now) {
-  const v = $('video'); if (now - lumAt < 600 || v.readyState < 2) return; lumAt = now;
+  const v = $('video'); if (now - lumAt < 200 || v.readyState < 2) return; lumAt = now;
   try { lx.drawImage(v, 0, 0, 32, 18); const d = lx.getImageData(0, 0, 32, 18).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += .3 * d[i] + .59 * d[i + 1] + .11 * d[i + 2]; lum = s / (d.length / 4) / 255; } catch (e) { lum = 1; }
-  dark = dark ? lum < .2 : lum < .14;        // hysteresis
+  // smoothed, two thresholds and minimum durations: one dark frame (camera exposure catching up after a dark scene) never
+  // shows the hint, and a bright picture clears it at once
+  lumS += (lum - lumS) * .35;
+  if (lumS < .14) { brightSince = 0; darkSince = darkSince || now; if (now - darkSince > 1500) dark = true; }
+  else if (lumS > .2) { darkSince = 0; brightSince = brightSince || now; if (now - brightSince > 400) dark = false; }
+  else { darkSince = 0; brightSince = 0; }
 }
 
 function faceState(now) {
@@ -139,7 +145,8 @@ function loop(now) {
   // scan just ended: say how it went
   $('fitEmpty').hidden = !$('fitCard').hidden;
   if (wasScanning && !scanning) {
-    toast(t.stats().scanned ? 'Scan abgeschlossen. Die Brille ist an Ihr Gesicht angepasst.' : 'Standardgröße. Für eine genaue Passform „Neu scannen“ wählen.');
+    if (t.stats().scanned) toast('Scan abgeschlossen. Die Brille ist an Ihr Gesicht angepasst.');
+    else toast('Standardgröße ohne Scan. Für Ihre Passform „Neu scannen“ wählen.', 4500, 'info');
   }
   if (scanning && !wasScanning) { $('toast').classList.add('off'); setGlassesOff(false); }
   wasScanning = scanning;
@@ -151,7 +158,7 @@ function loop(now) {
   // hints change only after they held for a moment, so they do not flicker
   const k = faceState(now);
   if (k !== cand) { cand = k; candAt = now; }
-  const hold = k === null ? 350 : k === 'lost' || k === 'lostDark' ? 700 : 900;
+  const hold = k === null ? 350 : k === 'lost' || k === 'lostDark' ? 700 : k === 'dark' ? 1200 : 900;
   if (now - candAt > hold) setHint(cand);
   const g = $('guide'); g.hidden = !scanning; g.classList.toggle('ok', scanning && hintKey === null);
 }
@@ -192,5 +199,15 @@ async function savePhoto() {
     try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
   }
   const a = document.createElement('a'); a.href = shotURL; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-  toast('Foto gesichert.', 2400);
+  toast('Foto gespeichert.', 2400);
+}
+
+// ---------------------------------------------------------------- fit card (values from app.js renderFitCard)
+// Without a scan the face model is the reference face, so its "measurements" would only describe that: show none.
+export function renderFit({ ratio, seatDrop, ipd, contact, scanned }) {
+  $('fitStd').hidden = scanned; $('fitMeas').hidden = !scanned;
+  $('fitWidth').textContent = ratio > 1.04 ? 'etwas breit' : ratio < .9 ? 'etwas schmal' : 'passend';
+  $('fitPd').textContent = '≈ ' + Math.round(ipd) + ' mm';
+  $('fitHeight').textContent = Math.abs(seatDrop) < 3 ? 'mittig vor den Augen' : seatDrop > 0 ? 'sitzen etwas tief' : 'sitzen etwas hoch';
+  $('fitNose').textContent = contact ? 'liegt am Nasenrücken auf' : 'Sitz auf der Nase prüfen';
 }
