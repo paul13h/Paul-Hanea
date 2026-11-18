@@ -276,7 +276,8 @@ function computeFit() {
   const armLen = Math.hypot(earR[0] - SPEC.hingeX, earR[1] - hy, hz - earR[2] + EAR_BACK);
   const ipd = v.len(v.sub(model[468], model[473]));
   const faceW = Math.abs(model[234][0] - model[454][0]);
-  return { midX, seat, seatZ, tilt, open, openL, openR, armDown, armLen, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact, earX: earR[0], earY: earR[1], earZ: earR[2] };
+  return { midX, seat, seatZ, tilt, open, openL, openR, armDown, armLen, ipd, faceW, pupilY: pupil[1], rows, contact: seat.contact, earX: earR[0], earY: earR[1], earZ: earR[2],
+    earXL: midX - sideOf([234, 127, 162]) - 2.5, earXR: midX + sideOf([454, 356, 389]) + 2.5 };
 }
 
 const basePos = new THREE.Vector3();
@@ -286,7 +287,7 @@ let downTilt = 0;
 // arms are re-aimed from the moved hinge at the same ear point, so their ear ends stay where the fit put them. DOWN_LEN (dl):
 // the arm's length to the ear is also re-measured from the moved hinge (the hinge comes up to ~8 mm forward; without this the arm
 // faded out that much short of the ear).
-let armLenNow = 0;
+let armLenNow = 0; const armBase = { L: [0, 0], R: [0, 0] };
 function placeFit(extra = 0) {
   const r = glasses.root, place = tilt => { r.rotation.set(tilt, 0, 0);
     const pad = new THREE.Vector3(0, SPEC.padY, SPEC.padZ).applyEuler(r.rotation);
@@ -301,6 +302,7 @@ function placeFit(extra = 0) {
   // the arms ran into the head and were hidden by the cheek)
   const aL = Math.max(-.05, Math.min(.2, fit.openL ?? fit.open)), aR = Math.max(-.05, Math.min(.2, fit.openR ?? fit.open));
   glasses.temples.L.rotation.set(-(armDown + tilt), aL, 0); glasses.temples.R.rotation.set(-(armDown + tilt), -aR, 0);
+  armBase.L = [-(armDown + tilt), aL]; armBase.R = [-(armDown + tilt), -aR];
 }
 function applyFit() {
   if (!fit) return;
@@ -357,6 +359,18 @@ const DOWN_KNEE = +(QS.get('dk') ?? 2), DOWN_GAIN = +(QS.get('dg') ?? 2), DOWN_M
 // D = (+3, -2, 0) on the laptop clip (tools/drift/offset3d.mjs)
 const OFF = ['ox', 'oy', 'oz'].map(k => +(QS.get(k) ?? 0));
 const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
+// EAR_DET (?ed=1, test): in near-profile views the yaw boost above is right for the front (without it the far lens stands out in
+// front of the nose), but on the no-glasses laptop clip fl (raw yaw 45-65) it moves the near side of the head 9 mm (median) off
+// the detected temple/ear/eye-corner landmarks (4 mm without the boost) and the arm ends sat ~14 mm above the ear (fl 500). With
+// EAR_DET the near arm aims at the ear point as the detected near-side landmarks place it in the picture (un-boosted pose plus the
+// landmarks' own residual), kept on the outside of the head (same distance from the centre line), faded in from ED_ON to
+// ED_ON + 15 degrees of raw turn. Laptop fl, arm end above the top of the ear, ed=0 / ed=1: 500 17 / 10 mm, 515 7 / 0-2 mm,
+// 545 11 / 5.5 mm, 530 11 / 11 mm; iPhone 342/420 within 1-2 mm of before; frames under 35 deg of turn unchanged (0 pixels);
+// ear-point jitter on fl median 4.9 vs 5.0 px (p90 12.9 vs 10.3). Not yet seen live, so off by default.
+// SCAN_DZ (?sdz, test): scale the scanned face's depth. 1.1 fits the landmarks a little better on the laptop (median PnP error
+// fl 2.57 -> 2.45 px, kmix 1.90 -> 1.73) but worse on the iPhone (3.47 -> 3.69), and the fit then seats the front 5-8 mm lower
+// straight on and makes the arms 16 mm longer: clearly worse, keep 1.
+const EAR_DET = +(QS.get('ed') ?? 0), ED_ON = +(QS.get('edk') ?? 35), SCAN_DZ = +(QS.get('sdz') ?? 1);
 // test only (off by default): extra look-down pitch below PITCH_KNEE, as v21 tried (pivots at the bridge anchor, so it also lifts the ears)
 const PITCH_KNEE = +(QS.get('pk') ?? 3), PITCH_GAIN = +(QS.get('pg') ?? 0);
 const resetFilters = () => { rotF.reset(); zF.reset(); axF.reset(); ayF.reset(); pose = null; };
@@ -374,8 +388,8 @@ function track(lms, w, h, tMs) {
   if (!pose) pose = solvePose(model, RIGID, pts, cam, initialPose(model, pts, cam), 18);
   else pose = solvePose(model, RIGID, pts, cam, pose, 3);
   if (pose.rms > 25) pose = solvePose(model, RIGID, pts, cam, initialPose(model, pts, cam), 18);   // lost: start again
-  const dt = Math.max(.008, Math.min(.1, (tMs - lastT) / 1000)); lastT = tMs;
-  let Rs = rotF.filter(pose.R, dt); const z = zF.filter(pose.t[2], dt);
+  const dt = Math.max(.008, Math.min(.1, (tMs - lastT) / 1000)); lastT = tMs; trackDt = dt;
+  let Rs = rotF.filter(pose.R, dt); const z = zF.filter(pose.t[2], dt), Rn = Rs;
   // Face tracking under-reads strong turns (the far side of the face is hidden), so add back part of the missing turn.
   const yw = yawOf(Rs), over = Math.abs(yw) - YAW_KNEE;
   if (over > 0) Rs = q.norm(q.mul(Rs, q.fromVec([0, Math.sign(yw) * YAW_GAIN * over / 57.3, 0])));
@@ -392,7 +406,9 @@ function track(lms, w, h, tMs) {
   const r = q.rot(Rs, am), Z = r[2] + z;
   const X = (ax - cam.cx) * -Z / cam.f, Y = (ay - cam.cy) * Z / cam.f;
   const t = [X - r[0], Y - r[1], z];
-  return { R: Rs, t, pts, raw: pose };
+  // the same bridge anchor with the un-boosted rotation: it fits the near side of the head (EAR_DET)
+  const rn = q.rot(Rn, am), Zn = rn[2] + z, tn = [(ax - cam.cx) * -Zn / cam.f - rn[0], (ay - cam.cy) * Zn / cam.f - rn[1], z];
+  return { R: Rs, t, Rn, tn, pts, raw: pose };
 }
 
 const qObj = new THREE.Quaternion(), pObj = new THREE.Vector3(), sObj = new THREE.Vector3(1, 1, 1);
@@ -406,10 +422,47 @@ function setHead(p) {
     // sideways part of (head forward minus its part along the line of sight), in head coordinates
     glasses.root.position.set(basePos.x - PARALLAX * ch[0] * fc, basePos.y, basePos.z);
   } else glasses.root.position.copy(basePos);
+  if (EAR_DET && fit && p.Rn) earDet(p);
   // the arm on the side turned away from the camera is behind the head; the near arm stays fully visible up to the ear
   for (const [name, s] of [['L', -1], ['R', 1]]) { const away = q.rot(p.R, [s, 0, 0])[2]; glasses.temples[name].visible = away > -.26; }
   occ.frame(p.R, p.t);
   if (DEBUG_NOOCC) { faceOcc.visible = false; skull.visible = false; glasses.root.traverse(o => { if (o.material && o.material.colorWrite === false && !o.material.stencilWrite) o.visible = false; }); }
+}
+
+// EAR_DET: where the detected near side of the head puts the ear point in the picture, and the point at the same distance from
+// the head's centre line (in the boosted head) that shows there; the near arm is re-aimed at it by the change in angle and length
+// against its fitted aim. The 2D offset is smoothed (edF) so landmark jitter does not shake the arm.
+const NEAR_L = [127, 234, 93, 162], NEAR_R = [356, 454, 323, 389], edF = [new OneEuro(1.5, .05), new OneEuro(1.5, .05)];
+let trackDt = 1 / 30;
+function earDet(p) {
+  const yr = Math.abs(yawOf(p.Rn)), w = Math.max(0, Math.min(1, (yr - ED_ON) / 15)), len = { L: armLenNow, R: armLenNow };
+  const nearR = q.rot(p.Rn, [1, 0, 0])[2] > 0, name = nearR ? 'R' : 'L', ks = nearR ? NEAR_R : NEAR_L;
+  for (const k of ['L', 'R']) glasses.temples[k].rotation.set(armBase[k][0], armBase[k][1], 0);
+  const dt = trackDt;
+  if (w > 0) {
+    const pr = (R, t, m) => { const c = v.add(q.rot(R, m), t); return [cam.cx + cam.f * c[0] / -c[2], cam.cy + cam.f * c[1] / c[2]]; };
+    const E = [nearR ? fit.earXR : fit.earXL, fit.earY, fit.earZ];
+    // target in the picture: un-boosted projection of the ear point plus the mean residual of the near-side landmarks
+    let rx = 0, ry = 0; for (const k of ks) { const a = pr(p.Rn, p.tn, model[k]); rx += p.pts[k][0] - a[0]; ry += p.pts[k][1] - a[1]; }
+    const tg = v.add(pr(p.Rn, p.tn, E), [rx / ks.length, ry / ks.length, 0]), cur = pr(p.R, p.t, E);
+    const off = [edF[0].filter(tg[0] - cur[0], dt), edF[1].filter(tg[1] - cur[1], dt)];
+    const u = cur[0] + w * off[0], vv = cur[1] + w * off[1];
+    // camera ray through (u, vv) in boosted head coordinates, cut with the plane x = E.x
+    const iR = q.conj(p.R), o = q.rot(iR, v.mul(p.t, -1)), d = q.rot(iR, [(u - cam.cx) / cam.f, -(vv - cam.cy) / cam.f, -1]);
+    if (Math.abs(d[0]) > 1e-4) {
+      const s = (E[0] - o[0]) / d[0], E2 = v.add(o, v.mul(d, s));
+      if (s > 0 && Math.abs(E2[1] - E[1]) < 40 && Math.abs(E2[2] - E[2]) < 40) {
+        const r = glasses.root, inv = new THREE.Euler(-r.rotation.x, 0, 0), piv = glasses.temples[name].position;
+        const dir = e => new THREE.Vector3(...e).sub(r.position).applyEuler(inv).sub(piv);
+        const ang = dd => { const n = dd.clone().normalize(); return [Math.atan2(n.y, -n.z), Math.asin(-n.x)]; };
+        const d0 = dir(E), d1 = dir(E2), [a0, b0] = ang(d0), [a1, b1] = ang(d1);
+        glasses.temples[name].rotation.set(armBase[name][0] + a1 - a0, armBase[name][1] + b1 - b0, 0);
+        len[name] = armLenNow + d1.length() - d0.length();
+        fit.earOverride = { side: name, point: E2 };   // for the occluders (occlusion track): where the near arm now meets the ear
+      }
+    }
+  } else { edF[0].reset(); edF[1].reset(); fit.earOverride = null; }
+  if (glasses.setArmEnd) glasses.setArmEnd(len);
 }
 
 // ---------------------------------------------------------------- face scan
@@ -446,6 +499,7 @@ function finishScan() {
     }
     const s = sizes.length ? Math.max(.82, Math.min(1.18, median(sizes))) : 1;
     model = model.map(p => v.mul(p, s));
+    if (SCAN_DZ !== 1) model = model.map(p => [p[0], p[1], p[2] * SCAN_DZ]);   // test (?sdz): deeper face model
     scanned = true;
   }
   resetFilters(); setOccluders(); fit = computeFit(); applyFit(); renderFitCard();
