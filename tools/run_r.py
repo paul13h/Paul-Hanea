@@ -12,7 +12,7 @@ frames=sorted(f for f in os.listdir(f'{S}/{clip}') if f.endswith('.jpg')); L=jso
 bad,sub=FR.scan(f'{S}/{clip}',frames); BAD=set(bad)  # unreadable frames: fed as the nearest good image with no face, never saved
 root=os.environ.get('ROOT') or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ONLY=set(int(x) for x in os.environ['ONLY'].split(',') if x) if os.environ.get('ONLY') else None  # save only these frames (tracking still runs on all)
-srv=subprocess.Popen([sys.executable,'-m','http.server',sys.argv[6]],cwd=root,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); time.sleep(1)
+srv=subprocess.Popen([sys.executable,os.path.join(os.path.dirname(os.path.abspath(__file__)),'serve.py'),sys.argv[6]],cwd=root,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); time.sleep(1)
 INIT='''async (scan) => {
   document.getElementById('startView').hidden = true;
   window.cv = document.createElement('canvas'); cv.width = W; cv.height = H;
@@ -42,7 +42,7 @@ try:
     pg=b.new_page(viewport={'width':1100,'height':1100})
     errs=[]; pg.on('pageerror',lambda e:errs.append(str(e)))
     pg.route('**/__f/*',lambda r:r.fulfill(path=f'{S}/{clip}/'+frames[sub[int(r.request.url.rsplit('/',1)[1])]]))
-    pg.goto('http://localhost:'+sys.argv[6]+'/v2/tf.html?capture=1&'+sys.argv[5]); SC=float(os.environ.get('SCALE','1')); pg.evaluate(f'window.W={int(960*SC)};window.H={int(640*SC)}'); pg.wait_for_function('window.__tryon',timeout=30000)
+    pg.goto('http://localhost:'+sys.argv[6]+'/v2/tf.html?capture=1&'+sys.argv[5]); SC=float(os.environ.get('SCALE','1')); pg.evaluate(f'window.W={int(960*SC)};window.H={int(640*SC)}'); pg.wait_for_function('window.__tryon',timeout=90000)
     pg.evaluate("import('/v2/solver.js').then(m=>window.__S=m)"); time.sleep(.5)
     pg.evaluate(INIT,scan)
     rec=[]; t0=time.time()
