@@ -68,7 +68,8 @@ main{max-width:1360px;margin:0 auto;padding:0 32px 28px;display:grid;grid-templa
 #hint svg{width:16px;height:16px;flex:none;color:var(--warn)}
 #toast{position:absolute;left:50%;top:16px;transform:translateX(-50%);z-index:3;padding:10px 16px;border-radius:999px;background:rgba(245,241,234,.95);color:var(--ink);font-size:14px;display:flex;gap:8px;align-items:center;width:max-content;max-width:calc(100% - 32px);transition:opacity .3s,transform .3s;pointer-events:none}
 #toast.off{opacity:0;transform:translate(-50%,-6px)}
-#toast svg{width:16px;height:16px;flex:none;color:#3f6b38}
+#toast svg{width:16px;height:16px;flex:none;color:#3f6b38}#toast .ic-info{color:var(--soft)}
+#toast .ic-info,#toast[data-kind=info] .ic-ok{display:none}#toast[data-kind=info] .ic-info{display:block}
 /* controls over the live picture */
 #tools{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:3;display:flex;gap:4px;padding:5px;border-radius:999px;background:rgba(20,16,13,.64);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
 #tools button{display:flex;align-items:center;gap:8px;border:0;background:none;color:var(--on);padding:9px 16px;border-radius:999px;font-size:13.5px;white-space:nowrap;min-height:40px}
@@ -85,7 +86,7 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:14px;pa
 aside h2{font:400 30px/1.05 var(--serif);margin:6px 0 4px}
 aside .p{color:var(--soft);margin:0 0 18px;font-size:14px;font-variant-numeric:tabular-nums}
 .sec{border-top:1px solid var(--line);padding-top:16px}
-#fitEmpty{color:var(--soft);font-size:14px;margin:0}
+#fitEmpty,#fitStd{color:var(--soft);font-size:14px;margin:0}#fitStd .eyebrow{display:block;margin-bottom:6px}
 dl{margin:0;display:grid;grid-template-columns:1fr 1fr;gap:14px 12px}dt{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}dd{margin:0;font-weight:500;font-size:14px}
 dl .wide{grid-column:1 / -1}
 .adj{margin-top:18px}.adj .eyebrow{display:block;margin-bottom:8px}
@@ -106,6 +107,20 @@ small{display:block;color:var(--faint);line-height:1.45;margin-top:18px;font-siz
   #tools{bottom:14px}#tools button{padding:9px 13px}
   #shotImg{max-width:88%;max-height:64%}
   aside{padding:18px}
+}
+/* phone, landscape: the stage takes the full height, the details scroll beside it */
+@media (orientation:landscape) and (max-height:520px){
+  header{display:none}
+  main{grid-template-columns:minmax(0,1fr) 230px;gap:10px;padding:8px 10px;max-width:none}
+  #stage{aspect-ratio:auto;height:calc(100vh - 16px);height:calc(100svh - 16px - var(--st) - var(--sb));max-height:none;border-radius:12px}
+  aside{max-height:calc(100svh - 16px - var(--st) - var(--sb));overflow:auto;padding:14px 16px}
+  aside h2{font-size:24px}
+  .layer{padding:14px 18px;gap:8px}.layer h1{font-size:26px}.layer p{font-size:13px}
+  .hints{gap:4px 14px;margin:0;font-size:12px}
+  #startView>.eyebrow,.layer .privacy{display:none}
+  #guide{height:70%}
+  #scanView{padding-bottom:12px}
+  #tools{bottom:10px}#hint,#toast{top:10px}
 }
 @media (max-width:360px){#tools button span{display:none}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.spin{border-right-color:currentColor;opacity:.5}}
@@ -170,7 +185,7 @@ window.__fatal = function (kind) {
   </div>
   <div class="layer" id="scanView" hidden><span class="steps" id="scanSteps" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p id="scanText" aria-live="polite"></p><div class="bar" id="scanProg" role="progressbar" aria-label="Fortschritt des Scans" aria-valuemin="0" aria-valuemax="100"><div id="scanBar"></div></div><button id="skipBtn">Scan überspringen</button></div>
   <div id="hint" class="off" role="status" aria-live="polite"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></svg><span id="hintText"></span></div>
-  <div id="toast" class="off" role="status" aria-live="polite"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span id="toastText"></span></div>
+  <div id="toast" class="off" role="status" aria-live="polite"><svg class="ic-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><svg class="ic-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5v.01"/></svg><span id="toastText"></span></div>
   <div id="tools" hidden>
     <button id="shotBtn" aria-label="Foto aufnehmen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>Foto</span></button>
     <button id="cmpBtn" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="6.5" cy="13" r="3.5"/><circle cx="17.5" cy="13" r="3.5"/><path d="M10 13h4"/></svg><span>Ohne Brille</span></button>
@@ -178,7 +193,7 @@ window.__fatal = function (kind) {
   <div id="flash"></div>
   <div class="layer" id="shotView" hidden role="dialog" aria-modal="true" aria-label="Ihr Foto">
     <img id="shotImg" alt="Ihr Foto mit der Tom Ford FT5902-B">
-    <div class="btnrow"><button class="primary" id="saveBtn">Foto sichern</button><button class="ghostbtn" id="closeShotBtn">Schließen</button></div>
+    <div class="btnrow"><button class="primary" id="saveBtn">Foto speichern</button><button class="ghostbtn" id="closeShotBtn">Schließen</button></div>
   </div>
   <div class="layer" id="errView" hidden role="alertdialog" aria-labelledby="errTitle" aria-describedby="errText">
     <div class="err-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 7.5v6M12 16.8v.01"/><circle cx="12" cy="12" r="9.5"/></svg></div>
@@ -190,7 +205,8 @@ window.__fatal = function (kind) {
   <div class="sec">
     <p id="fitEmpty">Nach dem Gesichtsscan sehen Sie hier, wie die Fassung zu Ihnen passt.</p>
     <div id="fitCard" hidden>
-      <dl><div><dt>Breite</dt><dd id="fitWidth"></dd></div><div><dt>Pupillendistanz</dt><dd id="fitPd"></dd></div><div class="wide"><dt>Sitz der Gläser</dt><dd id="fitHeight"></dd></div><div class="wide"><dt>Nase</dt><dd id="fitNose"></dd></div></dl>
+      <p id="fitStd" hidden><span class="eyebrow">Standardwerte</span>Ohne Gesichtsscan zeigt die Anprobe die Standardgröße. Ihre Werte sehen Sie nach einem Scan.</p>
+      <dl id="fitMeas"><div><dt>Breite</dt><dd id="fitWidth"></dd></div><div><dt>Pupillendistanz</dt><dd id="fitPd"></dd></div><div class="wide"><dt>Gläser</dt><dd id="fitHeight"></dd></div><div class="wide"><dt>Nase</dt><dd id="fitNose"></dd></div></dl>
       <div class="adj"><span class="eyebrow">Sitz anpassen</span><div class="row"><button id="upBtn">Höher</button><button id="downBtn">Tiefer</button></div></div>
       <button id="rescanBtn">Neu scannen</button>
     </div>

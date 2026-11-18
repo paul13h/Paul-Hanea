@@ -5,7 +5,7 @@ import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=29';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
-import { initUI } from './ui.js?v=29';
+import { initUI, renderFit } from './ui.js?v=29';
 import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=29';
 import { initOcc } from './occluder.js?v=29';
 
@@ -325,15 +325,9 @@ function poseFit(p) {
   if (Math.abs(d - downTilt) > .02) { downTilt = d; placeFit(d); if (glasses.setArmEnd) glasses.setArmEnd(armLenNow); }
 }
 
-function renderFitCard() {
-  const fw = 2 * SPEC.hingeX + 5, ratio = fw / fit.faceW;
-  const width = ratio > 1.04 ? 'etwas breit' : ratio < .9 ? 'etwas schmal' : 'passend';
+function renderFitCard() {   // the wording is in ui.js
   const seatDrop = fit.pupilY - (fit.seat.y + nudge - SPEC.padY);
-  const h = Math.abs(seatDrop) < 3 ? 'mittig vor den Augen' : seatDrop > 0 ? 'etwas tiefer' : 'etwas höher';
-  $('fitWidth').textContent = width;
-  $('fitHeight').textContent = h;
-  $('fitPd').textContent = '≈ ' + Math.round(fit.ipd) + ' mm';
-  $('fitNose').textContent = fit.contact ? 'Stege liegen am Nasenrücken an' : 'Stege ggf. anpassen';
+  renderFit({ ratio: (2 * SPEC.hingeX + 5) / fit.faceW, seatDrop, ipd: fit.ipd, contact: fit.contact, scanned });
   fitCard.hidden = false;
 }
 
