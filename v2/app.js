@@ -370,7 +370,7 @@ const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
 // SCAN_DZ (?sdz, test): scale the scanned face's depth. 1.1 fits the landmarks a little better on the laptop (median PnP error
 // fl 2.57 -> 2.45 px, kmix 1.90 -> 1.73) but worse on the iPhone (3.47 -> 3.69), and the fit then seats the front 5-8 mm lower
 // straight on and makes the arms 16 mm longer: clearly worse, keep 1.
-const EAR_DET = +(QS.get('ed') ?? 0), ED_ON = +(QS.get('edk') ?? 35), SCAN_DZ = +(QS.get('sdz') ?? 1);
+const EAR_DET = +(QS.get('ed') ?? 1), ED_ON = +(QS.get('edk') ?? 35), SCAN_DZ = +(QS.get('sdz') ?? 1);
 // test only (off by default): extra look-down pitch below PITCH_KNEE, as v21 tried (pivots at the bridge anchor, so it also lifts the ears)
 const PITCH_KNEE = +(QS.get('pk') ?? 3), PITCH_GAIN = +(QS.get('pg') ?? 0);
 const resetFilters = () => { rotF.reset(); zF.reset(); axF.reset(); ayF.reset(); pose = null; };
