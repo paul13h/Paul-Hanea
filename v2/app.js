@@ -362,7 +362,12 @@ const YAW_KNEE = +(QS.get('yk') ?? 22), YAW_GAIN = +(QS.get('yg') ?? .55);
 // the detected temple/ear/eye-corner landmarks (4 mm without the boost) and the arm ends sat ~14 mm above the ear (fl 500). With
 // EAR_DET the near arm aims at the ear point as the detected near-side landmarks place it in the picture (un-boosted pose plus the
 // landmarks' own residual), kept on the outside of the head (same distance from the centre line), faded in from ED_ON to
-// ED_ON + 15 degrees of raw turn. SCAN_DZ (?sdz, test): scale the scanned face's depth.
+// ED_ON + 15 degrees of raw turn. Laptop fl, arm end above the top of the ear, ed=0 / ed=1: 500 17 / 10 mm, 515 7 / 0-2 mm,
+// 545 11 / 5.5 mm, 530 11 / 11 mm; iPhone 342/420 within 1-2 mm of before; frames under 35 deg of turn unchanged (0 pixels);
+// ear-point jitter on fl median 4.9 vs 5.0 px (p90 12.9 vs 10.3). Not yet seen live, so off by default.
+// SCAN_DZ (?sdz, test): scale the scanned face's depth. 1.1 fits the landmarks a little better on the laptop (median PnP error
+// fl 2.57 -> 2.45 px, kmix 1.90 -> 1.73) but worse on the iPhone (3.47 -> 3.69), and the fit then seats the front 5-8 mm lower
+// straight on and makes the arms 16 mm longer: clearly worse, keep 1.
 const EAR_DET = +(QS.get('ed') ?? 0), ED_ON = +(QS.get('edk') ?? 35), SCAN_DZ = +(QS.get('sdz') ?? 1);
 // test only (off by default): extra look-down pitch below PITCH_KNEE, as v21 tried (pivots at the bridge anchor, so it also lifts the ears)
 const PITCH_KNEE = +(QS.get('pk') ?? 3), PITCH_GAIN = +(QS.get('pg') ?? 0);
