@@ -1,13 +1,13 @@
 import * as THREE from 'three';
-import { studioEnv } from './env.js?v=30';
-import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=30';
-import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=30';
+import { studioEnv } from './env.js?v=31';
+import { buildTomFord, SPEC as SPEC_TF } from './tomford.js?v=31';
+import { REF, RIGID as RIGID_ALL } from './face-ref.js?v=31';
 // Points on the outline of the face slide along the silhouette when the head turns, so they are left out of the pose.
 const EDGE = new Set([127, 356, 234, 454, 21, 251, 54, 284, 103, 332, 67, 297, 162, 389, 93, 323, 132, 361, 58, 288]);
 const RIGID = RIGID_ALL.filter(k => !EDGE.has(k));
-import { initUI, renderFit } from './ui.js?v=30';
-import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=30';
-import { initOcc } from './occluder.js?v=30';
+import { initUI, renderFit } from './ui.js?v=31';
+import { v, q, solvePose, initialPose, OneEuro, QuatFilter, refineModel, median, noseProfile, seatOnNose } from './solver.js?v=31';
+import { initOcc } from './occluder.js?v=31';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), canvas = $('view'), videoEl = $('video');
